@@ -102,6 +102,38 @@ out vec4 frag;
 void main() { frag = vec4(uColor, 1.0); }
 )";
 
+// The grid: each line knows which plate coordinate it holds (x or y) and how far apart its
+// neighbours are. Where they come closer on screen than a few pixels (far away, or seen at a low
+// angle) they fade out, so the plate shows no moire of crowded lines.
+const char* kGridVert = R"(#version 330 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uMvp;
+out vec2 vPlane;
+void main() {
+  vPlane = aPos.xy;
+  gl_Position = uMvp * vec4(aPos, 1.0);
+}
+)";
+
+const char* kGridFrag = R"(#version 330 core
+uniform vec3 uColor;
+uniform float uSpacing;  // mm between neighbouring lines; 0: never fades
+uniform int uAxis;       // 0: lines at a fixed x, 1: at a fixed y
+in vec2 vPlane;
+out vec4 frag;
+void main() {
+  float alpha = 1.0;
+  if (uSpacing > 0.0) {
+    float c = uAxis == 0 ? vPlane.x : vPlane.y;
+    float perPixel = length(vec2(dFdx(c), dFdy(c)));
+    float pixels = uSpacing / max(perPixel, 1e-6);
+    alpha = smoothstep(3.0, 9.0, pixels);
+  }
+  if (alpha <= 0.01) discard;
+  frag = vec4(uColor, alpha);
+}
+)";
+
 GLuint compileShader(QOpenGLFunctions_3_3_Core* gl, GLenum type, const char* source) {
   GLuint shader = gl->glCreateShader(type);
   gl->glShaderSource(shader, 1, &source, nullptr);
@@ -305,6 +337,8 @@ QVector3D edgeOutward(const PickEdge& edge) {
 
 Viewport::Viewport(QWidget* parent) : QOpenGLWidget(parent) {
   QSurfaceFormat format;
+  // Four samples per pixel: smooth edges on parts, outlines and grid lines instead of stairs.
+  format.setSamples(4);
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setVersion(3, 3);
@@ -393,6 +427,7 @@ Viewport::~Viewport() {
   if (gizmoVao) glDeleteVertexArrays(1, &gizmoVao);
   if (meshProgram) glDeleteProgram(meshProgram);
   if (lineProgram) glDeleteProgram(lineProgram);
+  if (gridProgram) glDeleteProgram(gridProgram);
   doneCurrent();
 }
 
@@ -667,16 +702,19 @@ void Viewport::rebuildGrid() {
     push(std::min(x, hx), -hy);
     push(std::min(x, hx), hy);
   }
+  gridMinorX = static_cast<GLsizei>(lines.size() / 3);
   for (float y = -hy; y <= hy + fine * 0.25f; y += fine) {
     if (std::fmod(std::abs(y + hy) + fine * 0.2f, majorStep) < fine * 0.6f) continue;
     push(-hx, std::min(y, hy));
     push(hx, std::min(y, hy));
   }
   gridMinor = static_cast<GLsizei>(lines.size() / 3);
+  gridFine = fine;
   for (float x = -hx; x <= hx + majorStep * 0.25f; x += majorStep) {
     push(std::min(x, hx), -hy);
     push(std::min(x, hx), hy);
   }
+  gridMajorX = static_cast<GLsizei>(lines.size() / 3) - gridMinor;
   for (float y = -hy; y <= hy + majorStep * 0.25f; y += majorStep) {
     push(-hx, std::min(y, hy));
     push(hx, std::min(y, hy));
@@ -737,7 +775,8 @@ float Viewport::gizmoLength(const QVector3D& pivot) const {
 bool Viewport::compile() {
   meshProgram = linkProgram(this, kMeshVert, kMeshFrag);
   lineProgram = linkProgram(this, kLineVert, kLineFrag);
-  return meshProgram && lineProgram;
+  gridProgram = linkProgram(this, kGridVert, kGridFrag);
+  return meshProgram && lineProgram && gridProgram;
 }
 
 void Viewport::initializeGL() {
@@ -1326,12 +1365,13 @@ void Viewport::paintViewCube(QPainter& painter) const {
   for (int i = 0; i < 2; ++i) {
     const QRectF box = cubeButton(i);
     const bool hot = hoverView == 10 + i;
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(18, 21, 26, 170));
-    painter.drawRoundedRect(box.adjusted(-3, -3, 3, 3), 7, 7);
+    // A plain rounded button, like the rest of the app's: one border, set on the half pixel so
+    // it stays a crisp single line.
     painter.setPen(QPen(QColor("#e87400"), 1.0));
     painter.setBrush(hot ? QColor(232, 116, 0) : QColor(37, 44, 54));
-    painter.drawRoundedRect(box, 5, 5);
+    painter.drawRoundedRect(QRectF(std::round(box.x()) + 0.5, std::round(box.y()) + 0.5, std::round(box.width()) - 1,
+                                   std::round(box.height()) - 1),
+                            4, 4);
     const QColor ink = hot ? QColor(24, 18, 10) : QColor(236, 230, 218);
     if (i == 0) {
       // A little house.
@@ -2115,7 +2155,9 @@ QStringList Viewport::marqueeIds(const QRectF& rect, bool crossing) const {
 void Viewport::paintGL() {
   if (gridDirty) rebuildGrid();
   if (dirty) upload();
-  // QPainter at the end of the previous frame leaves depth writes and the depth test off.
+  // QPainter at the end of the previous frame leaves depth writes and the depth test off, and
+  // multisampling as its own hint left it: on again, so edges stay smooth.
+  glEnable(GL_MULTISAMPLE);
   glDisable(GL_CULL_FACE);
   glDisable(GL_BLEND);
   glEnable(GL_DEPTH_TEST);
@@ -2178,21 +2220,37 @@ void Viewport::paintGL() {
 
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_FALSE);
-  glUseProgram(lineProgram);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glUseProgram(gridProgram);
   QMatrix4x4 grid;
   grid.translate(0, 0, static_cast<float>(workplaneZ));
-  glUniformMatrix4fv(glGetUniformLocation(lineProgram, "uMvp"), 1, GL_FALSE, (vp * grid).constData());
+  glUniformMatrix4fv(glGetUniformLocation(gridProgram, "uMvp"), 1, GL_FALSE, (vp * grid).constData());
+  const int gridColor = glGetUniformLocation(gridProgram, "uColor");
+  const int gridSpacing = glGetUniformLocation(gridProgram, "uSpacing");
+  const int gridAxis = glGetUniformLocation(gridProgram, "uAxis");
   glBindVertexArray(gridVao);
   if (showGrid) {
-    glUniform3f(lineColor, 0.16f, 0.18f, 0.22f);
-    glDrawArrays(GL_LINES, 0, gridMinor);
-    glUniform3f(lineColor, 0.30f, 0.36f, 0.42f);
-    glDrawArrays(GL_LINES, gridMinor, gridMajor);
-    glUniform3f(lineColor, 0.45f, 0.50f, 0.56f);
+    glUniform3f(gridColor, 0.16f, 0.18f, 0.22f);
+    glUniform1f(gridSpacing, gridFine);
+    glUniform1i(gridAxis, 0);
+    glDrawArrays(GL_LINES, 0, gridMinorX);
+    glUniform1i(gridAxis, 1);
+    glDrawArrays(GL_LINES, gridMinorX, gridMinor - gridMinorX);
+    glUniform3f(gridColor, 0.30f, 0.36f, 0.42f);
+    glUniform1f(gridSpacing, gridFine * 10.f);
+    glUniform1i(gridAxis, 0);
+    glDrawArrays(GL_LINES, gridMinor, gridMajorX);
+    glUniform1i(gridAxis, 1);
+    glDrawArrays(GL_LINES, gridMinor + gridMajorX, gridMajor - gridMajorX);
+    glUniform3f(gridColor, 0.45f, 0.50f, 0.56f);
+    glUniform1f(gridSpacing, 0.f);
     glDrawArrays(GL_LINES, gridMinor + gridMajor, gridTicks);
   }
-  glUniform3f(lineColor, 0.78f, 0.55f, 0.32f);
+  glUniform3f(gridColor, 0.78f, 0.55f, 0.32f);
+  glUniform1f(gridSpacing, 0.f);
   glDrawArrays(GL_LINES, gridMinor + gridMajor + gridTicks, gridBorder);
+  glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
 
   const DrawItem* gizmo = gizmoItem();

@@ -229,10 +229,14 @@ class Viewport : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
 
   GLuint meshProgram = 0;
   GLuint lineProgram = 0;
+  GLuint gridProgram = 0;  // the plate's grid: lines fade out where they crowd closer than a few pixels
   GLuint gridVao = 0;
   GLuint gridVbo = 0;
   GLsizei gridCount = 0;
   GLsizei gridMinor = 0;
+  GLsizei gridMinorX = 0;  // of the minor lines, those at a fixed x (the rest are at a fixed y)
+  GLsizei gridMajorX = 0;
+  float gridFine = 1.f;  // mm between minor grid lines
   GLsizei gridMajor = 0;
   GLsizei gridTicks = 0;
   GLsizei gridBorder = 0;

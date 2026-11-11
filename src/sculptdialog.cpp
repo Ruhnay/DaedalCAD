@@ -432,6 +432,8 @@ void SculptView::upload() {
 }
 
 void SculptView::paintGL() {
+  // The brush ring's QPainter at the end of the last frame may have left multisampling off.
+  glEnable(GL_MULTISAMPLE);
   glClearColor(0.105f, 0.125f, 0.150f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   if (!program_) return;
