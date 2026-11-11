@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The group's square and circle as one outline: strokes first, the fill laid over the inner half. -->
+  <g stroke="#e87400" stroke-width="3.2" stroke-linejoin="round" fill="none">
+    <path d="M7.5 12h9.0a1.5 1.5 0 0 1 1.5 1.5v9.0a1.5 1.5 0 0 1 -1.5 1.5h-9.0a1.5 1.5 0 0 1 -1.5 -1.5v-9.0a1.5 1.5 0 0 1 1.5 -1.5Z"/>
+    <path d="M13.3 13.5a6.2 6.2 0 1 0 12.4 0a6.2 6.2 0 1 0 -12.4 0Z"/>
+  </g>
+  <g fill="#633d1a">
+    <path d="M7.5 12h9.0a1.5 1.5 0 0 1 1.5 1.5v9.0a1.5 1.5 0 0 1 -1.5 1.5h-9.0a1.5 1.5 0 0 1 -1.5 -1.5v-9.0a1.5 1.5 0 0 1 1.5 -1.5Z"/>
+    <path d="M13.3 13.5a6.2 6.2 0 1 0 12.4 0a6.2 6.2 0 1 0 -12.4 0Z"/>
+  </g>
+  <path d="M5 28.5h22" stroke="#e87400" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

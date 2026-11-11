@@ -1,0 +1,21 @@
+{
+  "name": "daedalsync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Project sync store for DaedalCAD",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "daedalsync": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js serve",
+    "test": "node --test test/api.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
