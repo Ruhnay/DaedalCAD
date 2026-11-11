@@ -3427,10 +3427,12 @@ void MainWindow::buildUi() {
     QVector3D n = normal;
     if (n.lengthSquared() < 1e-8f) n = QVector3D(0, 0, 1);
     else n.normalize();
+    // The bend starts right on the face, with no gap: grouped (or exported) with the part it
+    // joins it, the shared face welding away. (It used to start 0.05 mm off the face.)
     QVector3D centroid;
-    for (const QVector3D& point : outline) centroid += point + n * 0.05f;
+    for (const QVector3D& point : outline) centroid += point;
     centroid /= static_cast<float>(outline.size());
-    const QVector3D centroidRaw = centroid - n * 0.05f;
+    const QVector3D centroidRaw = centroid;
     double ignoredPos[3];
     double rot[3];
     double scale[3];
