@@ -3892,6 +3892,14 @@ Manifold growElbow(const Node& node, QString* warning) {
   const double turnCount = std::max(1.0, absAngle / (2.0 * kPi));
   const int steps = std::clamp(static_cast<int>(std::lround(node.faceSteps * turnCount)), 2, 4096);
   const double radialPerTurn = node.faceSpiral ? node.faceRadialStep : 0.0;
+  // The radius runs from the middle of the face to the hinge. A face wider than twice that would
+  // reach past the hinge, and its far part would swing the other way, through the bend: the
+  // bend would fold into itself and come out short. Then the hinge goes to the face's inner edge
+  // instead (a sharp inside corner), so the whole face turns and the end is as long as the face.
+  double reachToHinge = 0;
+  for (const vec3& p : *active)
+    reachToHinge = std::max(reachToHinge, turnSign * ((p.x - cx) * bx + (p.y - cy) * by + (p.z - cz) * bz));
+  const double turnRadius = std::max({0.2, baseRadius, reachToHinge + 0.05});
 
   // The sweep: z = Z-per * (angle/360) / steps, then
   // rotY(anglePerStep).movey(z). Total hinge travel is Z-per * (angle/360),
@@ -3920,7 +3928,7 @@ Manifold growElbow(const Node& node, QString* warning) {
     }
 
     const double theta = angle * t;
-    const double radius = std::max(0.2, baseRadius);
+    const double radius = turnRadius;
     // Slide stays on the hinge, after the turn. Pitch walks along the face
     // normal, so a full turn ends above or below the face instead of on it.
     const double ox = cx + turnSign * bx * radius;

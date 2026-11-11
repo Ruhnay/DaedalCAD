@@ -2683,6 +2683,9 @@ void MainWindow::buildUi() {
   faceForm->addRow("Turn", facePresetBox);
   faceForm->addRow("Turn deg", faceAngleSpin);
   faceForm->addRow("Radius mm", faceRadiusSpin);
+  faceRadiusSpin->setToolTip(
+      "From the middle of the face to the line it turns round. A face wider than twice this turns round its own inner "
+      "edge instead (a sharp inside corner), so the end always comes out as long as the face.");
   faceForm->addRow("Steps", faceStepsSpin);
   faceForm->addRow("Z per step", faceRiseSpin);
   faceRiseSpin->setToolTip(
@@ -5138,7 +5141,10 @@ void MainWindow::showHelp() {
        "narrows to half, a cylinder becomes a cone. Taper is made first, so a tapered part can still be twisted and bent."},
       {"bend_face", "Bend face",
        "Click a flat face. A new bent piece grows out of that face; the original part is left alone. "
-       "Angle, radius and steps shape the bend; Rise and Spiral turn it into a helix."},
+       "Angle, radius and steps shape the bend; Rise and Spiral turn it into a helix.<br><br>"
+       "<b>Radius</b> runs from the middle of the face to the line it turns round. On a face wider than twice the radius "
+       "(across the bend) the bend turns round the face's inner edge instead, with a sharp inside corner, so the end is "
+       "always as long as the face it grew from."},
       {"fillet", "Fillet edge",
        "Rounds edges of a basic shape such as a box, cylinder or prism. Click edges to pick them (Shift adds or removes), "
        "set the radius, then Apply. All edges rounds every edge at once."},
