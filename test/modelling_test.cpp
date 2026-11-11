@@ -303,14 +303,17 @@ int main(int argc, char** argv) {
     save(doc, "text_on_curve");
   }
 
-  // Bend face on a face taller than twice the radius: the whole face turns (the hinge goes to its
-  // inner edge), so the end is as long as the face. A 10 x 80 face turned 90 degrees round a hinge
-  // at its edge sweeps (Pappus) 800 x (40 x pi / 2) mm3, and the end face spans the full 80 mm.
-  {
+  // Bend face on a 10 x 80 face, 90 degrees, radius 30. The radius is the inside radius: the hinge
+  // is 30 mm past the face's inner edge, so the whole face turns, the end is as long as the face
+  // and the elbow is a quarter ring from 30 to 110 mm round the hinge (Pappus: 800 x 70 x pi / 2).
+  // A bend from an older project measured the radius from the middle of the face: it keeps that,
+  // with the hinge moved to the face's edge where the face would reach past it.
+  for (const bool inner : {true, false}) {
     Document doc;
     const QString id = doc.addShape("elbow", 0, 0);
     Node* e = doc.find(id);
     e->faceBend = true;
+    e->faceInnerRadius = inner;
     e->faceAngle = 90;
     e->faceRadius = 30;
     e->faceSteps = 48;
@@ -319,20 +322,18 @@ int main(int argc, char** argv) {
     e->faceNormal[1] = 0;
     e->faceNormal[2] = 0;
     e->faceLoop = {0, -5, -40, 0, 5, -40, 0, 5, 40, 0, -5, 40};
-    e->pos[0] = 0;
-    e->pos[1] = 0;
     e->pos[2] = 40;
     QString error;
     const CpuMesh mesh = evaluateSolid(doc, {}, &error);
-    const double expected = 800 * 40.05 * kPiTest / 2;
-    std::printf("tall face bend: volume %.0f (expected %.0f), box %.1f x %.1f x %.1f\n", mesh.volume, expected, mesh.hi[0] - mesh.lo[0],
-                mesh.hi[1] - mesh.lo[1], mesh.hi[2] - mesh.lo[2]);
-    check(std::abs(mesh.volume - expected) < 0.01 * expected, "a tall face bends whole: the elbow is as big as the face swept");
-    // The swept face turns from upright to lying flat: the elbow reaches 80 mm (the face) plus the
-    // 0.05 mm inner radius out from the hinge, both ways.
-    check(std::abs((mesh.hi[0] - mesh.lo[0]) - 80.05) < 0.5 && std::abs((mesh.hi[2] - mesh.lo[2]) - 80.05) < 0.5,
+    const double centre = inner ? 70 : 40.05;  // the face's middle from the hinge
+    const double reach = inner ? 110 : 80.05;  // its outer edge
+    const double expected = 800 * centre * kPiTest / 2;
+    std::printf("%s face bend: volume %.0f (expected %.0f), box %.2f x %.2f x %.2f\n", inner ? "inside-radius" : "old-style",
+                mesh.volume, expected, mesh.hi[0] - mesh.lo[0], mesh.hi[1] - mesh.lo[1], mesh.hi[2] - mesh.lo[2]);
+    check(std::abs(mesh.volume - expected) < 0.01 * expected, "the whole face turns: the elbow is the face swept round the hinge");
+    check(std::abs((mesh.hi[0] - mesh.lo[0]) - reach) < 0.5 && std::abs((mesh.hi[2] - mesh.lo[2]) - reach) < 0.5,
           "the end is as long as the face");
-    save(doc, "tall_face_bend");
+    if (inner) save(doc, "tall_face_bend");
   }
 
   std::printf(failures ? "%d failure(s)\n" : "all modelling checks passed\n", failures);

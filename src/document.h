@@ -101,6 +101,10 @@ struct Node {
   bool faceBend = false;
   double faceAngle = 90;
   double faceRadius = 30;
+  // How faceRadius is measured: from the face's inner edge to the line it turns round (the inside
+  // radius of the bend, as on bent sheet metal; new bends), or from the middle of the face (bends
+  // saved before 0.9.7's fix, kept as they were).
+  bool faceInnerRadius = true;
   int faceSteps = 12;
   double faceRise = 0;
   bool faceSpiral = false;

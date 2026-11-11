@@ -3892,14 +3892,17 @@ Manifold growElbow(const Node& node, QString* warning) {
   const double turnCount = std::max(1.0, absAngle / (2.0 * kPi));
   const int steps = std::clamp(static_cast<int>(std::lround(node.faceSteps * turnCount)), 2, 4096);
   const double radialPerTurn = node.faceSpiral ? node.faceRadialStep : 0.0;
-  // The radius runs from the middle of the face to the hinge. A face wider than twice that would
-  // reach past the hinge, and its far part would swing the other way, through the bend: the
-  // bend would fold into itself and come out short. Then the hinge goes to the face's inner edge
-  // instead (a sharp inside corner), so the whole face turns and the end is as long as the face.
+  // Where the hinge is. The radius is the inside radius of the bend: from the face's inner edge
+  // (its side toward the hinge) to the hinge, so the whole face turns, the end is as long as the
+  // face and a bigger radius gives a rounder inside. Bends saved before measured it from the middle
+  // of the face; they keep that, except that a face wider than twice the radius would reach past
+  // the hinge, swing partly the other way through the bend and come out short: then the hinge goes
+  // to the face's inner edge (a sharp inside corner).
   double reachToHinge = 0;
   for (const vec3& p : *active)
     reachToHinge = std::max(reachToHinge, turnSign * ((p.x - cx) * bx + (p.y - cy) * by + (p.z - cz) * bz));
-  const double turnRadius = std::max({0.2, baseRadius, reachToHinge + 0.05});
+  const double turnRadius = node.faceInnerRadius ? reachToHinge + std::max(0.05, node.faceRadius)
+                                                 : std::max({0.2, baseRadius, reachToHinge + 0.05});
 
   // The sweep: z = Z-per * (angle/360) / steps, then
   // rotY(anglePerStep).movey(z). Total hinge travel is Z-per * (angle/360),
@@ -4205,7 +4208,7 @@ std::string cacheKey(const Node& node, const Document& doc) {
                      n(std::abs(node.twist) > 0.05 ? node.scale[2] : 0),
                      node.faceBend ? QStringLiteral("1") : QStringLiteral("0"),
                      n(node.faceAngle),
-                     n(node.faceRadius),
+                     n(node.faceRadius) + (node.faceInnerRadius ? QStringLiteral("i") : QString()),
                      QString::number(node.faceSteps),
                      n(node.faceRise),
                      node.faceSpiral ? QStringLiteral("1") : QStringLiteral("0"),
@@ -4272,7 +4275,7 @@ std::string cacheKey(const Node& node, const Document& doc) {
             << n(std::abs(src->twist) > 0.05 ? src->scale[0] : 0) << n(std::abs(src->twist) > 0.05 ? src->scale[1] : 0)
             << n(std::abs(src->twist) > 0.05 ? src->scale[2] : 0)
             << QString::number(src->toward) << (src->faceBend ? QStringLiteral("1") : QStringLiteral("0")) << n(src->faceAngle)
-            << n(src->faceRadius) << QString::number(src->faceSteps) << n(src->faceRise)
+            << n(src->faceRadius) + (src->faceInnerRadius ? QStringLiteral("i") : QString()) << QString::number(src->faceSteps) << n(src->faceRise)
             << (src->faceSpiral ? QStringLiteral("1") : QStringLiteral("0")) << n(src->faceRadialStep)
             << QString::number(src->faceAxisMode) << mixLoop(src->faceLoop) << mixLoop(src->facePointNormals)
             << (src->mirror[0] ? QStringLiteral("1") : QStringLiteral("0")) << (src->mirror[1] ? QStringLiteral("1") : QStringLiteral("0"))
@@ -6027,7 +6030,7 @@ std::string groupKey(const Document& doc, const Node& group) {
             << n(cur.scale[2]);
     if (!cur.thread.isEmpty()) parts << QStringLiteral("thr") << cur.thread << n(cur.threadPitch) << n(cur.threadClearance);
     parts
-          << (cur.faceBend ? QStringLiteral("1") : QStringLiteral("0")) << n(cur.faceAngle) << n(cur.faceRadius)
+          << (cur.faceBend ? QStringLiteral("1") : QStringLiteral("0")) << n(cur.faceAngle) << n(cur.faceRadius) + (cur.faceInnerRadius ? QStringLiteral("i") : QString())
           << QString::number(cur.faceSteps) << n(cur.faceRise) << QString::number(cur.faceAxisMode)
           << QString::asprintf("%llx", static_cast<unsigned long long>(loopHash));
     if (!cur.edgeBeta.empty()) {

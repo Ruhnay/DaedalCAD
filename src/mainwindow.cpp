@@ -276,6 +276,7 @@ QJsonObject toJson(const Document& doc) {
     obj["faceBend"] = node.faceBend;
     obj["faceAngle"] = node.faceAngle;
     obj["faceRadius"] = node.faceRadius;
+    obj["faceInnerRadius"] = node.faceInnerRadius;
     obj["faceSteps"] = node.faceSteps;
     obj["faceRise"] = node.faceRise;
     obj["faceSpiral"] = node.faceSpiral;
@@ -419,6 +420,8 @@ Document fromJson(const QJsonObject& root) {
     node.faceBend = obj["faceBend"].toBool(false);
     node.faceAngle = obj["faceAngle"].toDouble(node.faceAngle);
     node.faceRadius = obj["faceRadius"].toDouble(node.faceRadius);
+    // Bends saved before the inside radius measured from the middle of the face: kept that way.
+    node.faceInnerRadius = obj["faceInnerRadius"].toBool(false);
     node.faceSteps = obj["faceSteps"].toInt(node.faceSteps);
     node.faceRise = obj["faceRise"].toDouble(0);
     node.faceSpiral = obj["faceSpiral"].toBool(false);
@@ -2660,7 +2663,7 @@ void MainWindow::buildUi() {
   auto* faceForm = new QFormLayout(facePage);
   faceForm->setContentsMargins(0, 0, 0, 0);
   faceAngleSpin = makeSpin(-3600, 3600, 5);
-  faceRadiusSpin = makeSpin(0.5, 2000, 1);
+  faceRadiusSpin = makeSpin(0, 2000, 1);
   faceRiseSpin = makeSpin(-200, 200, 0.5);
   faceStepsSpin = new QSpinBox(facePage);
   faceStepsSpin->setRange(2, 256);
@@ -2684,8 +2687,8 @@ void MainWindow::buildUi() {
   faceForm->addRow("Turn deg", faceAngleSpin);
   faceForm->addRow("Radius mm", faceRadiusSpin);
   faceRadiusSpin->setToolTip(
-      "From the middle of the face to the line it turns round. A face wider than twice this turns round its own inner "
-      "edge instead (a sharp inside corner), so the end always comes out as long as the face.");
+      "The inside radius of the bend: from the face's inner edge to the line it turns round. The whole face turns, so the "
+      "end is as long as the face; a bigger radius gives a rounder inside.");
   faceForm->addRow("Steps", faceStepsSpin);
   faceForm->addRow("Z per step", faceRiseSpin);
   faceRiseSpin->setToolTip(
@@ -5142,9 +5145,9 @@ void MainWindow::showHelp() {
       {"bend_face", "Bend face",
        "Click a flat face. A new bent piece grows out of that face; the original part is left alone. "
        "Angle, radius and steps shape the bend; Rise and Spiral turn it into a helix.<br><br>"
-       "<b>Radius</b> runs from the middle of the face to the line it turns round. On a face wider than twice the radius "
-       "(across the bend) the bend turns round the face's inner edge instead, with a sharp inside corner, so the end is "
-       "always as long as the face it grew from."},
+       "<b>Radius</b> is the inside radius of the bend: from the face's inner edge to the line it turns round, as on bent "
+       "sheet metal. The whole face turns, so the end is always as long as the face it grew from. (Bends from projects "
+       "saved before 0.9.7's fix keep their old shape.)"},
       {"fillet", "Fillet edge",
        "Rounds edges of a basic shape such as a box, cylinder or prism. Click edges to pick them (Shift adds or removes), "
        "set the radius, then Apply. All edges rounds every edge at once."},
