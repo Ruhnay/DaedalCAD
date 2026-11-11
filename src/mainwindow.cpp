@@ -3430,6 +3430,7 @@ void MainWindow::buildUi() {
     QVector3D centroid;
     for (const QVector3D& point : outline) centroid += point + n * 0.05f;
     centroid /= static_cast<float>(outline.size());
+    const QVector3D centroidRaw = centroid - n * 0.05f;
     double ignoredPos[3];
     double rot[3];
     double scale[3];
@@ -3446,10 +3447,19 @@ void MainWindow::buildUi() {
     elbow.pos[0] = origin.x();
     elbow.pos[1] = origin.y();
     elbow.pos[2] = origin.z();
+    // The bend is made at the part's real size: a part stretched with its scale (a box made
+    // longer with the handles, say) has its face scaled up here, and the bend itself is not
+    // scaled. (Taking the part's scale along made the bend on the unstretched face and then
+    // stretched it, so a long face came out with a short end.)
     for (int i = 0; i < 3; ++i) {
       elbow.rot[i] = rot[i];
-      elbow.scale[i] = scale[i];
+      elbow.scale[i] = 1;
     }
+    const QVector3D stretch{static_cast<float>(scale[0]), static_cast<float>(scale[1]), static_cast<float>(scale[2])};
+    auto safe = [](float v) { return std::abs(v) > 1e-6f ? v : 1e-6f; };
+    n = QVector3D(n.x() / safe(stretch.x()), n.y() / safe(stretch.y()), n.z() / safe(stretch.z())).normalized();
+    axis = QVector3D(axis.x() * stretch.x(), axis.y() * stretch.y(), axis.z() * stretch.z());
+    if (axis.lengthSquared() > 1e-12f) axis.normalize();
     elbow.faceAngle = faceAngleSpin->value();
     elbow.faceRadius = faceRadiusSpin->value();
     elbow.faceSteps = faceStepsSpin->value();
@@ -3476,7 +3486,7 @@ void MainWindow::buildUi() {
         elbow.faceLoop.push_back(1e20);
         gap = false;
       }
-      const QVector3D local = point + n * 0.05f - centroid;
+      const QVector3D local = (point - centroidRaw) * stretch;
       elbow.faceLoop.push_back(local.x());
       elbow.faceLoop.push_back(local.y());
       elbow.faceLoop.push_back(local.z());
@@ -9035,10 +9045,18 @@ void MainWindow::extrudePickedFace(const QString& id, const QVector<QVector3D>& 
   extrude.name = QString("Extrusion %1").arg(doc.nodes.size() + 1);
   extrude.faceExtrude = true;
   extrude.extrudeDepth = extrudeDepthSpin ? extrudeDepthSpin->value() : 10;
+  // Made at the part's real size, as Bend face is: a stretched part's scale goes into the face,
+  // so the depth is the depth asked for, not stretched with the part.
+  const QVector3D stretch{static_cast<float>(localScale[0]), static_cast<float>(localScale[1]), static_cast<float>(localScale[2])};
+  auto safe = [](float v) { return std::abs(v) > 1e-6f ? v : 1e-6f; };
+  n = QVector3D(n.x() / safe(stretch.x()), n.y() / safe(stretch.y()), n.z() / safe(stretch.z())).normalized();
+  localAxis = QVector3D(localAxis.x() * stretch.x(), localAxis.y() * stretch.y(), localAxis.z() * stretch.z());
+  localAxis -= n * QVector3D::dotProduct(localAxis, n);
+  if (localAxis.lengthSquared() > 1e-12f) localAxis.normalize();
   for (int i = 0; i < 3; ++i) {
     extrude.pos[i] = localPos[i];
     extrude.rot[i] = localRot[i];
-    extrude.scale[i] = localScale[i];
+    extrude.scale[i] = 1;
   }
   extrude.faceNormal[0] = n.x();
   extrude.faceNormal[1] = n.y();
@@ -9054,7 +9072,7 @@ void MainWindow::extrudePickedFace(const QString& id, const QVector<QVector3D>& 
       extrude.faceLoop.push_back(1e20);
       continue;
     }
-    const QVector3D local = point - centroid;
+    const QVector3D local = (point - centroid) * stretch;
     extrude.faceLoop.push_back(local.x());
     extrude.faceLoop.push_back(local.y());
     extrude.faceLoop.push_back(local.z());
