@@ -100,9 +100,9 @@ add_executable(DaedalCAD
 
 target_include_directories(DaedalCAD PRIVATE src)
 # Where Help > Check for updates looks by default: the latest release of this GitHub repository.
-# A fork sets its own: -DDAEDALCAD_GITHUB_REPO=owner/name.
-set(DAEDALCAD_GITHUB_REPO "Ruhnay/DaedalCAD" CACHE STRING "GitHub repository (owner/name) whose releases are the updates")
-target_compile_definitions(DaedalCAD PRIVATE DAEDALCAD_VERSION="${PROJECT_VERSION}" DAEDALCAD_GITHUB_REPO="${DAEDALCAD_GITHUB_REPO}")
+# A fork sets its own: -DDAEDALCAD_UPDATE_REPO=owner/name.
+set(DAEDALCAD_UPDATE_REPO "Ruhnay/DaedalCAD" CACHE STRING "GitHub repository (owner/name) whose releases are the updates")
+target_compile_definitions(DaedalCAD PRIVATE DAEDALCAD_VERSION="${PROJECT_VERSION}" DAEDALCAD_GITHUB_REPO="${DAEDALCAD_UPDATE_REPO}")
 
 target_link_libraries(DaedalCAD PRIVATE
   Qt6::Widgets

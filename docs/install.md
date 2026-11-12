@@ -164,7 +164,7 @@ repository (it needs no login, so the repository has to be public):
 Installed copies then update themselves. They use the installer only when its name is
 `DaedalCAD-<version>-setup.exe` (or ends in `-setup.exe`) and the tag is the version, with or
 without the `v`. Drafts and pre-releases are not offered. A fork builds with its own repository:
-`-DDAEDALCAD_GITHUB_REPO=owner/name`.
+`-DDAEDALCAD_UPDATE_REPO=owner/name`.
 
 ## 5. When something goes wrong
 
