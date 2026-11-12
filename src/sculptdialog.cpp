@@ -1,5 +1,7 @@
 #include "sculptdialog.h"
 
+#include "viewport.h"  // smoothingSamples
+
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -259,7 +261,7 @@ QImage stampPattern(const QString& key) {
 SculptView::SculptView(sculpt::Sculptor* sculptor, QWidget* parent) : QOpenGLWidget(parent), sculptor_(sculptor) {
   QSurfaceFormat format;
   format.setDepthBufferSize(24);
-  format.setSamples(4);
+  format.setSamples(smoothingSamples());
   format.setVersion(3, 3);
   format.setProfile(QSurfaceFormat::CoreProfile);
   setFormat(format);

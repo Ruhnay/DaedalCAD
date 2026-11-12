@@ -1,5 +1,7 @@
 #include "viewport.h"
 
+#include <QSettings>
+
 #include "pickindex.h"
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -335,10 +337,16 @@ QVector3D edgeOutward(const PickEdge& edge) {
 
 }  // namespace
 
+int smoothingSamples() {
+  const int asked = QSettings().value(QStringLiteral("display/smoothSamples"), 4).toInt();
+  return asked >= 8 ? 8 : asked >= 4 ? 4 : asked >= 2 ? 2 : 0;
+}
+
 Viewport::Viewport(QWidget* parent) : QOpenGLWidget(parent) {
   QSurfaceFormat format;
-  // Four samples per pixel: smooth edges on parts, outlines and grid lines instead of stairs.
-  format.setSamples(4);
+  // Several samples per pixel (Settings > Display): smooth edges on parts, outlines and grid
+  // lines instead of stairs.
+  format.setSamples(smoothingSamples());
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setVersion(3, 3);

@@ -17,6 +17,11 @@ class PickIndex;
 class QKeyEvent;
 class QPainter;
 
+// Samples per pixel for smooth edges in the 3D views (0: off; 2, 4 or 8), from Settings > Display.
+// Read when a view is made, so a change shows in views opened after it (the main view: after a
+// restart).
+int smoothingSamples();
+
 class Viewport : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
   Q_OBJECT
 

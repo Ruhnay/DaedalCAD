@@ -4013,11 +4013,13 @@ void MainWindow::buildUi() {
     refreshTree();
     loadInspector();
     refreshScene();
+    markSaved();
     status("New project. The bed is empty.");
   });
   file->addAction("Open…", QKeySequence::Open, this, [this] { openDocument(); });
   recentMenu = file->addMenu(QStringLiteral("Recent"));
   refreshRecentMenu();
+  file->addAction(QStringLiteral("Recent projects…"), this, [this] { offerRecentProjects(true); });
   file->addAction("Save…", QKeySequence::Save, this, [this] { saveDocument(); });
   auto addExportFormats = [this](QMenu* menu, bool selected) {
     menu->addAction(QStringLiteral("STL"), this, [this, selected] { exportMesh(selected, QStringLiteral("stl")); });
@@ -5715,10 +5717,44 @@ void MainWindow::openSettings() {
     printerLayout->addStretch(1);
     tabs->addTab(printerTab, QStringLiteral("Printer"));
   }
+  QComboBox* smoothBox = nullptr;
+  if (auto* tabs = dialog.findChild<QTabWidget*>()) {
+    auto* displayTab = new QWidget(tabs);
+    auto* displayLayout = new QVBoxLayout(displayTab);
+    auto* form = new QFormLayout;
+    smoothBox = new QComboBox(displayTab);
+    smoothBox->addItem(QStringLiteral("Off"), 0);
+    smoothBox->addItem(QStringLiteral("2× (light)"), 2);
+    smoothBox->addItem(QStringLiteral("4× (default)"), 4);
+    smoothBox->addItem(QStringLiteral("8× (smoothest)"), 8);
+    smoothBox->setCurrentIndex(std::max(0, smoothBox->findData(smoothingSamples())));
+    smoothBox->setToolTip(QStringLiteral("Anti-aliasing: smooth edges on parts and lines in the 3D views."));
+    form->addRow(QStringLiteral("Smooth edges"), smoothBox);
+    displayLayout->addLayout(form);
+    auto* explain = new QLabel(QStringLiteral(
+        "Smooth edges (anti-aliasing) draws each pixel from several samples, so edges and lines in the 3D view and the "
+        "sculpt window have no stairs. More samples look smoother and ask more of the graphics card: turn it down or "
+        "off if the view feels slow on an older or built-in GPU.<br><br>"
+        "<b>The main view picks up a change the next time DaedalCAD starts</b>; sculpt windows opened after the "
+        "change use it straight away."), displayTab);
+    explain->setWordWrap(true);
+    explain->setTextFormat(Qt::RichText);
+    displayLayout->addWidget(explain);
+    displayLayout->addStretch(1);
+    tabs->addTab(displayTab, QStringLiteral("Display"));
+  }
   std::function<void()> commitKeys;
   if (auto* tabs = dialog.findChild<QTabWidget*>()) tabs->addTab(buildKeysPage(tabs, &commitKeys), QStringLiteral("Keyboard"));
   const int result = dialog.exec();
   if (result == QDialog::Accepted && commitKeys) commitKeys();
+  if (result == QDialog::Accepted && smoothBox) {
+    const int samples = smoothBox->currentData().toInt();
+    if (samples != smoothingSamples()) {
+      QSettings().setValue(QStringLiteral("display/smoothSamples"), samples);
+      status(QStringLiteral("Smooth edges set to %1: the main view picks it up the next time DaedalCAD starts.")
+                 .arg(samples ? QStringLiteral("%1×").arg(samples) : QStringLiteral("off")));
+    }
+  }
   if (platePage) {
     platePage->setParent(this);
     platePage->hide();
@@ -8013,6 +8049,7 @@ bool MainWindow::saveDocument() {
   dropLegacyProjectFile(directory);
   projectDirectory = QDir(directory).absolutePath();
   rememberProject(filePath);
+  markSaved();
   if (missing.isEmpty())
     status(QStringLiteral("Saved %1").arg(QDir::toNativeSeparators(filePath)));
   else
@@ -8399,6 +8436,7 @@ bool MainWindow::loadProjectFile(const QString& path) {
   loadInspector();
   refreshScene();
   rememberProject(path);
+  markSaved();
   status("Opened " + path);
   return true;
 }
@@ -8531,14 +8569,18 @@ void MainWindow::offerDataMove() {
     status(QStringLiteral("Copied %1 files to %2.").arg(copied).arg(QDir::toNativeSeparators(newRoot)));
 }
 
-void MainWindow::offerRecentProjects() {
+void MainWindow::offerRecentProjects(bool asked) {
   QSettings settings;
   QStringList live;
   for (const QString& raw : settings.value(QStringLiteral("recentProjects")).toStringList()) {
     const QString path = QDir::cleanPath(QFileInfo(raw).absoluteFilePath());
     if (QFileInfo::exists(path)) live << path;
   }
-  if (live.isEmpty() || !doc.nodes.empty()) return;
+  if (live.isEmpty()) {
+    if (asked) status(QStringLiteral("No recent projects yet."));
+    return;
+  }
+  if (!doc.nodes.empty() && !asked) return;
   QDialog dialog(this);
   dialog.setWindowTitle(QStringLiteral("Recent projects"));
   dialog.resize(560, 380);
@@ -9098,6 +9140,43 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
   placeOverlays();
 }
 
+void MainWindow::markSaved() { savedState = QJsonDocument(toJson(doc)).toJson(QJsonDocument::Compact); }
+
+bool MainWindow::hasUnsavedChanges() const {
+  if (doc.nodes.empty() && savedState.isEmpty()) return false;
+  return QJsonDocument(toJson(doc)).toJson(QJsonDocument::Compact) != savedState;
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+  // Changes since the last save (or since the project was opened): save them, leave without,
+  // or stay.
+  if (hasUnsavedChanges()) {
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Exit DaedalCAD"));
+    box.setText(projectDirectory.isEmpty() ? QStringLiteral("This project has not been saved.")
+                                           : QStringLiteral("“%1” has changes that are not saved.")
+                                                 .arg(QFileInfo(projectDirectory).fileName()));
+    box.setInformativeText(QStringLiteral("Save them before you exit?"));
+    QPushButton* save = box.addButton(QStringLiteral("Save and exit"), QMessageBox::AcceptRole);
+    QPushButton* leave = box.addButton(QStringLiteral("Exit without saving"), QMessageBox::DestructiveRole);
+    QPushButton* stay = box.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+    box.setDefaultButton(save);
+    box.setEscapeButton(stay);
+    box.exec();
+    if (box.clickedButton() == save) {
+      if (!saveDocument()) {
+        event->ignore();
+        return;
+      }
+    } else if (box.clickedButton() != leave) {
+      event->ignore();
+      return;
+    }
+  }
+  QMainWindow::closeEvent(event);
+}
+
 void MainWindow::showEvent(QShowEvent* event) {
   QMainWindow::showEvent(event);
   if (view && view->parentWidget()) {
@@ -9110,7 +9189,7 @@ void MainWindow::showEvent(QShowEvent* event) {
     // The start-up questions wait until the splash has faded, so nothing pops up over it.
     auto afterSplash = [this] {
       offerDataMove();
-      offerRecentProjects();
+      // Recent projects are in File > Recent (and File > Recent projects…); nothing pops up.
       // Look for update requests and new versions a moment later, once the window is settled.
       QTimer::singleShot(1500, this, [this] { checkCloudSyncAtStartup(this, cloudSyncHooks()); });
       QTimer::singleShot(4000, this, [this] { checkForUpdatesAtStartup(this, updateHooks()); });

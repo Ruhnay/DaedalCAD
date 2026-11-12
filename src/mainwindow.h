@@ -55,6 +55,7 @@ class MainWindow : public QMainWindow {
   bool eventFilter(QObject* watched, QEvent* event) override;
   void resizeEvent(QResizeEvent* event) override;
   void showEvent(QShowEvent* event) override;
+  void closeEvent(QCloseEvent* event) override;  // asks to save unsaved changes
 
  private:
   void buildUi();
@@ -89,7 +90,7 @@ class MainWindow : public QMainWindow {
   bool loadProjectFile(const QString& path);
   void rememberProject(const QString& filePath);
   void refreshRecentMenu();
-  void offerRecentProjects();
+  void offerRecentProjects(bool asked = false);  // asked: from the menu, not at start-up
   // Installed copy, first start: offer to copy the data of an earlier portable copy to Documents.
   void offerDataMove();
   UpdateHooks updateHooks();
@@ -436,4 +437,8 @@ class MainWindow : public QMainWindow {
   QStringList twoDShapesDirectories;
   QStringList twoDShapesDirectoryNames;
   QString projectDirectory;
+  // The project as last saved or opened (empty: a new project), to tell whether closing loses work.
+  QByteArray savedState;
+  void markSaved();
+  bool hasUnsavedChanges() const;
 };
