@@ -1,4 +1,6 @@
-<h1 align="center"><img src="appdata/splash.png" alt="DaedalCAD" width="600"></h1>
+<h1 align="center"><img src="appdata/splash.png" alt="DaedalCAD, a free TinkerCAD alternative" width="600"></h1>
+
+<p align="center"><b>A free, open-source TinkerCAD alternative for 3D printing, right on your desktop.</b></p>
 
 <p align="center"><a href="https://discord.gg/Z8mMTZK6B6"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&amp;logoColor=white" alt="Join the DaedalCAD Discord server"></a></p>
 
