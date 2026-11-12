@@ -31,6 +31,7 @@
 #include <thread>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 using manifold::CrossSection;
@@ -464,6 +465,50 @@ bool parseStl(const QString& path, std::vector<StlTriangle>* tris, QString* warn
   return true;
 }
 
+// Fills the holes of a nearly closed STL: every loop of open edges (edges with a triangle on one
+// side only) of up to 64 points gets a fan of triangles, facing the same way as its neighbours.
+// Gives up, closing nothing, when an edge is used by more than two triangles or a loop is not
+// simple: those meshes need more than a patch. Returns how many holes it closed.
+int closeSmallStlHoles(manifold::MeshGL& mesh, const std::vector<uint32_t>& weldedTo) {
+  const size_t triCount = mesh.triVerts.size() / 3;
+  std::unordered_map<uint64_t, int> halfEdges;  // u -> v, how often
+  auto edgeKey = [](uint32_t u, uint32_t v) { return (static_cast<uint64_t>(u) << 32) | v; };
+  for (size_t t = 0; t < triCount; ++t) {
+    const uint32_t c[3] = {weldedTo[mesh.triVerts[t * 3]], weldedTo[mesh.triVerts[t * 3 + 1]], weldedTo[mesh.triVerts[t * 3 + 2]]};
+    if (c[0] == c[1] || c[1] == c[2] || c[0] == c[2]) return 0;
+    for (int i = 0; i < 3; ++i)
+      if (++halfEdges[edgeKey(c[i], c[(i + 1) % 3])] > 1) return 0;  // two triangles the same way round
+  }
+  // Each open edge u -> v needs a patch triangle with v -> u; walking those gives the hole's loop.
+  std::unordered_map<uint32_t, uint32_t> next;
+  for (const auto& [key, count] : halfEdges) {
+    const uint32_t u = static_cast<uint32_t>(key >> 32);
+    const uint32_t v = static_cast<uint32_t>(key & 0xffffffffu);
+    if (halfEdges.count(edgeKey(v, u))) continue;
+    if (!next.emplace(v, u).second) return 0;  // two holes meet in one point
+  }
+  if (next.empty()) return 0;
+  std::vector<std::vector<uint32_t>> loops;
+  std::unordered_set<uint32_t> done;
+  for (const auto& [start, unused] : next) {
+    if (done.count(start)) continue;
+    std::vector<uint32_t> loop;
+    uint32_t at = start;
+    do {
+      if (!done.insert(at).second || loop.size() > 64) return 0;
+      loop.push_back(at);
+      const auto it = next.find(at);
+      if (it == next.end()) return 0;
+      at = it->second;
+    } while (at != start);
+    if (loop.size() < 3) return 0;
+    loops.push_back(std::move(loop));
+  }
+  for (const std::vector<uint32_t>& loop : loops)
+    for (size_t i = 1; i + 1 < loop.size(); ++i) mesh.triVerts.insert(mesh.triVerts.end(), {loop[0], loop[i], loop[i + 1]});
+  return static_cast<int>(loops.size());
+}
+
 Manifold loadStlSolid(const QString& path, QString* warning) {
   std::vector<StlTriangle> tris;
   if (!parseStl(path, &tris, warning)) return {};
@@ -491,6 +536,8 @@ Manifold loadStlSolid(const QString& path, QString* warning) {
   struct Key { long long x, y, z; bool operator==(const Key& o) const { return x == o.x && y == o.y && z == o.z; } };
   struct Hash { size_t operator()(const Key& k) const { return std::hash<long long>()(k.x) ^ (std::hash<long long>()(k.y) << 1) ^ (std::hash<long long>()(k.z) << 2); } };
   std::unordered_map<Key, uint32_t, Hash> canonical;
+  std::vector<uint32_t> weldedTo;  // every corner's shared point
+  weldedTo.reserve(tris.size() * 3);
   auto keyOf = [](const vec3& p) -> Key { return {std::llround(p.x * 1e6), std::llround(p.y * 1e6), std::llround(p.z * 1e6)}; };
   for (const StlTriangle& t : tris) {
     const vec3 ps[3] = {t.a, t.b, t.c};
@@ -504,11 +551,28 @@ Manifold loadStlSolid(const QString& path, QString* warning) {
       mesh.triVerts.push_back(idx);
       const Key key = keyOf(p);
       const auto it = canonical.find(key);
-      if (it == canonical.end()) canonical.emplace(key, idx);
-      else { mesh.mergeFromVert.push_back(idx); mesh.mergeToVert.push_back(it->second); }
+      if (it == canonical.end()) {
+        canonical.emplace(key, idx);
+        weldedTo.push_back(idx);
+      } else {
+        mesh.mergeFromVert.push_back(idx);
+        mesh.mergeToVert.push_back(it->second);
+        weldedTo.push_back(it->second);
+      }
     }
   }
   Manifold solid(mesh);
+  if (!healthy(solid)) {
+    // Many STLs out there have a tiny hole or two (a missing triangle, a crack between two
+    // surfaces) and are fine otherwise. Close small holes and try once more.
+    const int closed = closeSmallStlHoles(mesh, weldedTo);
+    if (closed > 0) {
+      solid = Manifold(mesh);
+      if (healthy(solid))
+        note(warning, closed == 1 ? QStringLiteral("That STL had a small hole; DaedalCAD closed it.")
+                                  : QStringLiteral("That STL had %1 small holes; DaedalCAD closed them.").arg(closed));
+    }
+  }
   if (!healthy(solid)) {
     note(warning, QStringLiteral("That STL is not a closed manifold solid and could not be imported as a solid."));
     return {};

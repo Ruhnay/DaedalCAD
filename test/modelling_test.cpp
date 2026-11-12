@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <map>
@@ -17,6 +18,7 @@
 static constexpr double kPiTest = 3.14159265358979323846;
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -56,6 +58,29 @@ double volumeOf(const Document& doc) {
   return evaluateSolid(doc, {}, &error).volume;
 }
 
+// A binary STL of a 20 mm cube, leaving out the triangles listed in `skip` (a hole).
+void writeCubeStl(const QString& path, const std::vector<int>& skip) {
+  const float c[8][3] = {{0, 0, 0}, {20, 0, 0}, {20, 20, 0}, {0, 20, 0}, {0, 0, 20}, {20, 0, 20}, {20, 20, 20}, {0, 20, 20}};
+  const int t[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4},
+                        {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+  QByteArray data(80, '\0');
+  QVector<int> kept;
+  for (int i = 0; i < 12; ++i)
+    if (std::find(skip.begin(), skip.end(), i) == skip.end()) kept << i;
+  const quint32 count = static_cast<quint32>(kept.size());
+  data.append(reinterpret_cast<const char*>(&count), 4);
+  for (int i : kept) {
+    float rec[12] = {0};
+    for (int k = 0; k < 3; ++k)
+      for (int a = 0; a < 3; ++a) rec[3 + k * 3 + a] = c[t[i][k]][a];
+    data.append(reinterpret_cast<const char*>(rec), 48);
+    data.append("\0\0", 2);
+  }
+  QFile file(path);
+  file.open(QIODevice::WriteOnly);
+  file.write(data);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -63,6 +88,43 @@ int main(int argc, char** argv) {
   QTemporaryDir dir;
   const QString out = argc > 1 ? QString::fromLocal8Bit(argv[1]) : dir.path();
   if (argc > 1) gOut = out;
+
+  // An STL with a small hole is closed on import: one missing triangle, or two side by side (a
+  // four-sided hole, like a crack between two surfaces).
+  for (const auto& [skip, what] : std::vector<std::pair<std::vector<int>, const char*>>{
+           {{2}, "one missing triangle"}, {{2, 3}, "a missing face (two triangles)"}}) {
+    const QString path = out + "/holed-" + QString::number(skip.size()) + ".stl";
+    writeCubeStl(path, skip);
+    Document doc;
+    const QString id = doc.addShape("stl", 0, 0);
+    doc.find(id)->meshPath = path;
+    QString warning;
+    buildEditView(doc, {}, &warning);  // what the window shows, with its note
+    check(warning.contains("closed"), std::string("STL with ") + what + ": it says it closed the hole (" + warning.toStdString() + ")");
+    QString error;
+    const CpuMesh mesh = evaluateSolid(doc, {}, &error);
+    check(std::abs(mesh.volume - 8000) < 1e-3, std::string("STL with ") + what + ": closed, a full cube (" + std::to_string(mesh.volume) + ")");
+  }
+  {
+    // One triangle turned the wrong way round is not a hole: it cannot be patched, still refused.
+    const QString path = out + "/broken.stl";
+    writeCubeStl(path, {});
+    QFile file(path);
+    file.open(QIODevice::ReadWrite);
+    QByteArray data = file.readAll();
+    const QByteArray second = data.mid(84 + 12 + 12, 12);
+    data.replace(84 + 12 + 12, 12, data.mid(84 + 12 + 24, 12));  // swap the first triangle's last two corners
+    data.replace(84 + 12 + 24, 12, second);
+    file.seek(0);
+    file.write(data);
+    file.close();
+    Document doc;
+    const QString id = doc.addShape("stl", 0, 0);
+    doc.find(id)->meshPath = path;
+    QString warning;
+    buildEditView(doc, {}, &warning);
+    check(warning.contains("not a closed manifold"), "an STL that cannot be patched is still refused (" + warning.toStdString() + ")");
+  }
 
   // Intersection: two 30 mm cubes overlapping by 10 mm keep a 10 x 30 x 30 slab.
   {
