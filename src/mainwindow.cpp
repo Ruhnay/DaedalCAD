@@ -2039,6 +2039,8 @@ void MainWindow::buildUi() {
   rotationStepSpin = makeSpin(0, 180, 1);
   rotationStepSpin->setDecimals(1);
   rotationStepSpin->setValue(0);
+  rotationStepSpin->setToolTip(QStringLiteral("The steps a drag snaps to in the inner band of the rotate disk. 0 uses 15 degrees. "
+                                              "In the outer band it always turns freely."));
   rotForm->addRow("Rotation step deg", rotationStepSpin);
   connect(rotationStepSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
     if (view) view->setRotationSnap(value);
@@ -3402,7 +3404,7 @@ void MainWindow::buildUi() {
       syncActions();
       loadInspector();
       status(mode == 0 ? "Drag the body on X/Y. White corners scale all sides. Black squares scale one side."
-                       : "Drag a ring to rotate, or type the degrees below.");
+                       : "Drag a ring to rotate: near the ring it snaps, further out it turns freely. Or type the degrees below.");
     });
     dress(button);
   };
@@ -5069,7 +5071,8 @@ void MainWindow::loadInspector() {
                             "can still move the cut or ungroup it.");
     } else if (tool == 1) {
       title = QStringLiteral("Rotate");
-      hint = QStringLiteral("Drag a ring to rotate, or type the degrees. Rotation step snaps the drag. 0 is free.");
+      hint = QStringLiteral("Drag a ring to rotate: in the disk's inner band it snaps to the rotation step (0: 15 degrees), "
+                            "in the outer band it turns freely. Or type the degrees.");
     } else if (pattern) {
       title = QStringLiteral("Repeat");
       hint = QStringLiteral("Copies, move, rotate, and resize for this repeat.");
@@ -5192,7 +5195,10 @@ void MainWindow::showHelp() {
        "The Move window shows the position and size. Type exact millimetres there. With Snap on, moves land on the snap step."},
       {"rotate", "Rotate",
        "Drag one of the three rings to turn the selection around that axis: red X, green Y, blue Z.<br><br>"
-       "The degrees can also be typed. <b>Rotation step</b> makes the drag snap, for example to 15 degrees. Set it to 0 to turn freely."},
+       "While you drag, a disk shows the angle. Keep the cursor in its <b>inner band</b> and the turn snaps in steps "
+       "(15 degrees, or the <b>Rotation step</b> you set); move it out to the <b>outer band</b> and it turns freely. "
+       "The angle so far is shown next to the cursor.<br><br>"
+       "The degrees can also be typed."},
       {"mirror", "Mirror",
        "Flip the selected part through its own centre on X, Y or Z with the Flip boxes. Flipping twice brings it back."},
       {"align", "Align",

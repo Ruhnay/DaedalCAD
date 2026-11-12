@@ -21,7 +21,9 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QMouseEvent>
+#include <QCursor>
 #include <QPainter>
+#include <QPainterPath>
 #include <QMatrix3x3>
 #include <QQuaternion>
 #include <QSurfaceFormat>
@@ -210,6 +212,11 @@ void pushTri(std::vector<float>& out, const QVector3D& a, const QVector3D& b, co
   push3(out, b);
   push3(out, c);
 }
+
+// The rotate disk, in parts of the ring's radius: the snapping band runs out to kRotateSnapEdge,
+// the free band from there to kRotateFreeEdge.
+constexpr float kRotateSnapEdge = 1.2f;
+constexpr float kRotateFreeEdge = 1.6f;
 
 void axisBasis(const QMatrix4x4& model, const QVector3D& pivot, int axis, QVector3D* dir, QVector3D* u, QVector3D* v) {
   QVector3D local(axis == 0 ? 1.f : 0.f, axis == 1 ? 1.f : 0.f, axis == 2 ? 1.f : 0.f);
@@ -778,6 +785,62 @@ float Viewport::gizmoLength(const QVector3D& pivot) const {
   const float dist = ortho ? radius : std::max(20.f, (eyePosition() - pivot).length());
   const float worldPerPx = 2.f * dist * std::tan(20.f * 3.14159265f / 180.f) / static_cast<float>(std::max(height(), 1));
   return std::max(12.f, worldPerPx * 120.f);
+}
+
+float Viewport::gizmoArrowStart(const DrawItem& item, const QVector3D& pivot, const QVector3D& dir, float len) const {
+  QVector3D lo;
+  QVector3D hi;
+  if (!meshBox(meshOf(item.mesh), &lo, &hi)) return 0.f;
+  float reach = 0.f;
+  QVector<QPointF> handles;
+  for (int i = 0; i < 8; ++i) {
+    const QVector3D corner = item.model.map(QVector3D((i & 1) ? hi.x() : lo.x(), (i & 2) ? hi.y() : lo.y(), (i & 4) ? hi.z() : lo.z()));
+    reach = std::max(reach, QVector3D::dotProduct(corner - pivot, dir));
+    handles << toScreen(corner);
+  }
+  const QVector3D mid = (lo + hi) * 0.5f;
+  for (int i = 0; i < 6; ++i) {
+    QVector3D face = mid;
+    face[i / 2] = (i % 2) ? hi[i / 2] : lo[i / 2];
+    handles << toScreen(item.model.map(face));
+  }
+  // Past the box in space, and then further out until, as seen from here, the whole arrow keeps
+  // clear of every handle. Looking almost along the arrow nothing helps: then it stays close by.
+  const float first = reach + len * 0.15f;
+  for (int step = 0; step <= 30; ++step) {
+    const float start = first + len * 0.1f * static_cast<float>(step);
+    const QPointF a = toScreen(pivot + dir * start);
+    const QPointF b = toScreen(pivot + dir * (start + len));
+    const QPointF ab = b - a;
+    const double ab2 = ab.x() * ab.x() + ab.y() * ab.y();
+    bool clear = true;
+    for (const QPointF& h : handles) {
+      double t = ab2 > 1e-6 ? ((h.x() - a.x()) * ab.x() + (h.y() - a.y()) * ab.y()) / ab2 : 0.0;
+      t = std::clamp(t, 0.0, 1.0);
+      const QPointF d = h - (a + ab * t);
+      if (d.x() * d.x() + d.y() * d.y() < 16.0 * 16.0) {
+        clear = false;
+        break;
+      }
+    }
+    if (clear) return start;
+  }
+  return first;
+}
+
+float Viewport::gizmoRingRadius(const DrawItem& item, const QVector3D& pivot, const QVector3D& u, const QVector3D& v,
+                                float len) const {
+  QVector3D lo;
+  QVector3D hi;
+  float reach = 0.f;
+  if (meshBox(meshOf(item.mesh), &lo, &hi)) {
+    for (int i = 0; i < 8; ++i) {
+      const QVector3D corner = item.model.map(QVector3D((i & 1) ? hi.x() : lo.x(), (i & 2) ? hi.y() : lo.y(), (i & 4) ? hi.z() : lo.z()));
+      const QVector3D d = corner - pivot;
+      reach = std::max(reach, std::hypot(QVector3D::dotProduct(d, u), QVector3D::dotProduct(d, v)));
+    }
+  }
+  return std::max(len * 0.72f, reach + len * 0.18f);
 }
 
 bool Viewport::compile() {
@@ -1461,7 +1524,7 @@ int Viewport::gizmoAxis(const QPointF& pos) const {
     QVector3D v;
     axisBasis(item->model, pivot, axisIndex, &dir, &u, &v);
     if (tool == 1) {
-      const float ring = len * 0.72f;
+      const float ring = gizmoRingRadius(*item, pivot, u, v, len);
       const float sweep = 5.6f;
       const float start = -0.5f;
       for (int sample = 0; sample <= 28; ++sample) {
@@ -1476,8 +1539,9 @@ int Viewport::gizmoAxis(const QPointF& pos) const {
         }
       }
     } else {
-      const QPointF origin = toScreen(pivot);
-      const QPointF tip = toScreen(pivot + dir * len);
+      const float start = gizmoArrowStart(*item, pivot, dir, len);
+      const QPointF origin = toScreen(pivot + dir * start);
+      const QPointF tip = toScreen(pivot + dir * (start + len));
       const QPointF ab = tip - origin;
       const float len2 = ab.x() * ab.x() + ab.y() * ab.y();
       if (len2 < 1.f) continue;
@@ -2354,6 +2418,47 @@ void Viewport::paintGL() {
         glUniform3f(lineColor, 0.22f, 0.78f, 0.86f);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(edges.size() / 3));
       }
+    }
+    for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
+      QVector3D dir;
+      QVector3D u;
+      QVector3D v;
+      axisBasis(gizmo->model, pivot, axisIndex, &dir, &u, &v);
+      std::vector<float> tris;
+      const bool active = axisIndex == hot;
+      const float scale = active ? 1.18f : 1.f;
+      if (active) addRod(tris, pivot - dir * len * 4.f, pivot + dir * len * 4.f, len * 0.012f);
+      if (tool == 1) {
+        // While turning, the disk shows the angle; the ring being turned stays, the others wait.
+        if (dragging && !scaleDrag && !active) continue;
+        addRing(tris, pivot, u, v, gizmoRingRadius(*gizmo, pivot, u, v, len) * scale, len * (active ? 0.03f : 0.02f), true);
+      } else {
+        const QVector3D start = pivot + dir * gizmoArrowStart(*gizmo, pivot, dir, len);
+        addArrow(tris, start, start + dir * len * scale);
+      }
+      if (tris.empty()) continue;
+      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(tris.size() * sizeof(float)), tris.data(), GL_DYNAMIC_DRAW);
+      float r = colors[axisIndex][0];
+      float g = colors[axisIndex][1];
+      float b = colors[axisIndex][2];
+      if (active) {
+        r = std::min(1.f, r + 0.35f);
+        g = std::min(1.f, g + 0.35f);
+        b = std::min(1.f, b + 0.35f);
+      } else if (dragging) {
+        r *= 0.35f;
+        g *= 0.35f;
+        b *= 0.35f;
+      }
+      glUniform3f(lineColor, r, g, b);
+      glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(tris.size() / 3));
+    }
+    // The resize handles last, on top of the arrows and rings, so they are never hidden.
+    if (meshBox(meshOf(gizmo->mesh), &boxLo, &boxHi)) {
+      auto cornerOf = [&](int index) {
+        return gizmo->model.map(QVector3D((index & 1) ? boxHi.x() : boxLo.x(), (index & 2) ? boxHi.y() : boxLo.y(),
+                                           (index & 4) ? boxHi.z() : boxLo.z()));
+      };
       const int activeHandle = scaleDrag ? scaleHandle : hoverHandle;
       const QVector3D mid((boxLo.x() + boxHi.x()) * 0.5f, (boxLo.y() + boxHi.y()) * 0.5f, (boxLo.z() + boxHi.z()) * 0.5f);
       const QVector3D faces[6] = {QVector3D(boxLo.x(), mid.y(), mid.z()), QVector3D(boxHi.x(), mid.y(), mid.z()),
@@ -2372,37 +2477,6 @@ void Viewport::paintGL() {
       for (int i = 0; i < 8; ++i) drawHandle(cornerOf(i), cornerSize, i, false);
       const float faceSize = cornerSize * 0.72f;
       for (int i = 0; i < 6; ++i) drawHandle(gizmo->model.map(faces[i]), faceSize, 8 + i, true);
-    }
-    for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
-      QVector3D dir;
-      QVector3D u;
-      QVector3D v;
-      axisBasis(gizmo->model, pivot, axisIndex, &dir, &u, &v);
-      std::vector<float> tris;
-      const bool active = axisIndex == hot;
-      const float scale = active ? 1.18f : 1.f;
-      if (active) addRod(tris, pivot - dir * len * 4.f, pivot + dir * len * 4.f, len * 0.012f);
-      if (tool == 1) {
-        addRing(tris, pivot, u, v, len * 0.72f * scale, len * (active ? 0.03f : 0.02f), true);
-      } else {
-        addArrow(tris, pivot, pivot + dir * len * scale);
-      }
-      if (tris.empty()) continue;
-      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(tris.size() * sizeof(float)), tris.data(), GL_DYNAMIC_DRAW);
-      float r = colors[axisIndex][0];
-      float g = colors[axisIndex][1];
-      float b = colors[axisIndex][2];
-      if (active) {
-        r = std::min(1.f, r + 0.35f);
-        g = std::min(1.f, g + 0.35f);
-        b = std::min(1.f, b + 0.35f);
-      } else if (dragging) {
-        r *= 0.35f;
-        g *= 0.35f;
-        b *= 0.35f;
-      }
-      glUniform3f(lineColor, r, g, b);
-      glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(tris.size() / 3));
     }
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
@@ -2625,6 +2699,7 @@ void Viewport::paintGL() {
       }
     }
   }
+  if (dragging && tool == 1 && !scaleDrag && axis >= 0) paintRotateDisk(painter);
   if (marqueeing) {
     const QRectF rect(marqueeStart, marqueeCurrent);
     const QRectF normalized = rect.normalized();
@@ -2638,6 +2713,92 @@ void Viewport::paintGL() {
   paintMeasure(painter);
   paintViewCube(painter);
   paintFocusMarker(painter);
+}
+
+// The protractor shown while turning, flat in the plane being turned in: an inner band that snaps
+// to the rotation step, with a tick at every step, and an outer band where it turns freely. The
+// turned angle is shaded from where the drag started, and the angle is shown by the cursor.
+void Viewport::paintRotateDisk(QPainter& painter) const {
+  const QVector3D a = rotateStartDir;
+  const QVector3D b = QVector3D::crossProduct(dragAxis, a).normalized();
+  const float r = rotateRadius;
+  auto at = [&](double degrees, float radius) {
+    const double t = degrees * 3.14159265358979323846 / 180.0;
+    return toScreen(dragPivot + (a * float(std::cos(t)) + b * float(std::sin(t))) * radius);
+  };
+  auto circle = [&](float radius) {
+    QPolygonF poly;
+    for (int i = 0; i <= 120; ++i) poly << at(i * 3.0, radius);
+    return poly;
+  };
+  auto band = [&](float inner, float outer) {
+    QPainterPath path;
+    path.setFillRule(Qt::OddEvenFill);
+    path.addPolygon(circle(outer));
+    path.addPolygon(circle(inner));
+    return path;
+  };
+  const float snapIn = r * 0.55f;
+  const float snapOut = r * kRotateSnapEdge;
+  const float freeOut = r * kRotateFreeEdge;
+  const QColor accent(232, 116, 0);
+  painter.save();
+  painter.setRenderHint(QPainter::Antialiasing, true);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(QColor(24, 28, 34, rotateFree ? 70 : 125));
+  painter.drawPath(band(snapIn, snapOut));
+  painter.setBrush(QColor(24, 28, 34, rotateFree ? 125 : 55));
+  painter.drawPath(band(snapOut, freeOut));
+  // Ticks: every step in the snapping band (at most 72), every 5 degrees in the free band.
+  const double step = rotationSnap > 0.0 ? rotationSnap : 15.0;
+  const int snapTicks = std::min(72, std::max(1, static_cast<int>(std::lround(360.0 / step))));
+  const double tickStep = 360.0 / snapTicks;
+  painter.setPen(QPen(QColor(235, 228, 214, rotateFree ? 110 : 220), 1.2));
+  for (int i = 0; i < snapTicks; ++i) {
+    const double deg = i * tickStep;
+    const bool major = std::fmod(deg + 1e-6, 90.0) < 1e-3;
+    painter.drawLine(at(deg, snapOut - (snapOut - snapIn) * (major ? 0.45f : 0.25f)), at(deg, snapOut));
+  }
+  painter.setPen(QPen(QColor(235, 228, 214, rotateFree ? 200 : 90), 1.0));
+  for (int deg = 0; deg < 360; deg += 5) {
+    const float length = deg % 45 == 0 ? 0.5f : deg % 15 == 0 ? 0.32f : 0.18f;
+    painter.drawLine(at(deg, snapOut), at(deg, snapOut + (freeOut - snapOut) * length));
+  }
+  // Outlines, the active band in orange.
+  painter.setBrush(Qt::NoBrush);
+  painter.setPen(QPen(QColor(235, 228, 214, 90), 1.0));
+  painter.drawPolygon(circle(snapIn));
+  painter.drawPolygon(circle(freeOut));
+  painter.setPen(QPen(accent, 1.6));
+  painter.drawPolygon(circle(snapOut));
+  // The angle turned so far, from where the drag started.
+  const float sweepOut = rotateFree ? freeOut : snapOut;
+  QPolygonF wedge;
+  wedge << toScreen(dragPivot);
+  const int pieces = std::max(2, static_cast<int>(std::abs(rotateDegrees) / 3.0) + 2);
+  for (int i = 0; i <= pieces; ++i) wedge << at(rotateDegrees * i / pieces, sweepOut);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(QColor(232, 116, 0, 70));
+  painter.drawPolygon(wedge);
+  painter.setPen(QPen(QColor(235, 228, 214, 160), 1.2, Qt::DashLine));
+  painter.drawLine(toScreen(dragPivot), at(0, sweepOut));
+  painter.setPen(QPen(accent, 2.0));
+  painter.drawLine(toScreen(dragPivot), at(rotateDegrees, sweepOut));
+  // The angle by the cursor.
+  const QString text = rotateFree ? QStringLiteral("%1°  (free)").arg(rotateDegrees, 0, 'f', 1)
+                                  : QStringLiteral("%1°  (steps of %2°)").arg(rotateDegrees, 0, 'f', step < 1 ? 1 : 0).arg(step, 0, 'g', 4);
+  const QPoint cursor = mapFromGlobal(QCursor::pos());
+  const QFontMetrics metrics(painter.font());
+  QRectF box = QRectF(metrics.boundingRect(text)).adjusted(-6, -3, 6, 3);
+  box.moveTopLeft(QPointF(cursor) + QPointF(16, 14));
+  if (box.right() > width() - 4) box.moveRight(cursor.x() - 12);
+  if (box.bottom() > height() - 24) box.moveBottom(cursor.y() - 10);
+  painter.setPen(QPen(QColor(235, 228, 214), 1));
+  painter.setBrush(QColor(24, 28, 34, 225));
+  painter.drawRoundedRect(box, 4, 4);
+  painter.setPen(QColor(245, 239, 229));
+  painter.drawText(box, Qt::AlignCenter, text);
+  painter.restore();
 }
 
 bool Viewport::slicePlaneAt(const QPointF& pos, QVector3D* point, QVector3D* normal) const {
@@ -2777,8 +2938,7 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
   freeDrag = false;
   int box = boxHandleAt(event->position());
   axis = gizmoAxis(event->position());
-  if (tool == 1 && axis >= 0) box = -1;
-  else if (box >= 0) axis = -1;
+  if (box >= 0) axis = -1;
   if (box < 0 && axis < 0 && pickId(event->position()).isEmpty() && tool != 3 && tool != 4 && tool != 6 && tool != 7 &&
       tool != 8 && tool != 9 && tool != 10) {
     marqueeing = true;
@@ -2902,6 +3062,16 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
     } else {
       dragHit = dragPivot + QVector3D(1, 0, 0);
     }
+    QVector3D axisDir;
+    QVector3D u;
+    QVector3D v;
+    axisBasis(item->model, dragPivot, axis, &axisDir, &u, &v);
+    rotateRadius = gizmoRingRadius(*item, dragPivot, u, v, gizmoLength(dragPivot));
+    rotateStartDir = dragHit - dragPivot;
+    rotateStartDir -= dragAxis * QVector3D::dotProduct(rotateStartDir, dragAxis);
+    rotateStartDir = rotateStartDir.lengthSquared() > 1e-8f ? rotateStartDir.normalized() : u;
+    rotateDegrees = 0;
+    rotateFree = false;
   }
   emit transformStarted();
 }
@@ -3004,8 +3174,7 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
   if (!dragging || (axis < 0 && !freeArmed && !scaleDrag)) {
     int box = boxHandleAt(event->position());
     int hit = gizmoAxis(event->position());
-    if (tool == 1 && hit >= 0) box = -1;
-    else if (box >= 0) hit = -1;
+    if (box >= 0) hit = -1;
     if (hit != hoverAxis || box != hoverHandle) {
       hoverAxis = hit;
       hoverHandle = box;
@@ -3138,10 +3307,16 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
     a.normalize();
     b.normalize();
     float angle = std::atan2(QVector3D::dotProduct(dragAxis, QVector3D::crossProduct(a, b)), QVector3D::dotProduct(a, b));
-    if (rotationSnap > 0.0) {
-      const double degrees = angle * 180.0 / 3.14159265358979323846;
-      angle = static_cast<float>(std::round(degrees / rotationSnap) * rotationSnap * 3.14159265358979323846 / 180.0);
+    // The disk: inside its inner band the angle snaps to the rotation step (15 degrees when that is
+    // off); out in the outer band it turns freely.
+    rotateFree = (hit - dragPivot).length() > rotateRadius * kRotateSnapEdge;
+    double degrees = angle * 180.0 / 3.14159265358979323846;
+    if (!rotateFree) {
+      const double step = rotationSnap > 0.0 ? rotationSnap : 15.0;
+      degrees = std::round(degrees / step) * step;
+      angle = static_cast<float>(degrees * 3.14159265358979323846 / 180.0);
     }
+    rotateDegrees = degrees;
     QQuaternion qx = QQuaternion::fromAxisAndAngle(1, 0, 0, rot[0]);
     QQuaternion qy = QQuaternion::fromAxisAndAngle(0, 1, 0, rot[1]);
     QQuaternion qz = QQuaternion::fromAxisAndAngle(0, 0, 1, rot[2]);

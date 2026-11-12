@@ -156,6 +156,12 @@ class Viewport : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
   const DrawItem* gizmoItem() const;
   void rebuildGrid();
   float gizmoLength(const QVector3D& pivot) const;
+  // Where the move arrow along `dir` starts: just past the part's box, so it never covers the
+  // resize handles.
+  float gizmoArrowStart(const DrawItem& item, const QVector3D& pivot, const QVector3D& dir, float len) const;
+  // The radius of a rotate ring in the plane of u and v: around the part's box, for the same reason.
+  float gizmoRingRadius(const DrawItem& item, const QVector3D& pivot, const QVector3D& u, const QVector3D& v, float len) const;
+  void paintRotateDisk(QPainter& painter) const;
   QVector3D eyePosition() const;
   bool pickFace(const QPointF& pos, QString* id, QVector<QVector3D>* loop, QVector3D* localNormal, QVector3D* localAxis,
                 bool smooth = false, QVector<QVector3D>* pointNormals = nullptr, QMatrix4x4* modelOut = nullptr) const;
@@ -294,6 +300,12 @@ class Viewport : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
   QVector3D dragPivot;
   float dragParam = 0;
   QVector3D dragHit;
+  // Turning: the ring's radius, the direction the drag started in, and the angle so far. Inside the
+  // disk's inner band the angle snaps; further out it turns freely.
+  float rotateRadius = 0;
+  QVector3D rotateStartDir;
+  double rotateDegrees = 0;
+  bool rotateFree = false;
   double startPos[3]{};
   double startRot[3]{};
   double startScale[3]{1, 1, 1};
