@@ -1,4 +1,6 @@
-# DaedalCAD
+<h1 align="center"><img src="appdata/splash.png" alt="DaedalCAD" width="600"></h1>
+
+<p align="center"><a href="https://discord.gg/Z8mMTZK6B6"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&amp;logoColor=white" alt="Join the DaedalCAD Discord server"></a></p>
 
 DaedalCAD is a desktop 3D modeller for 3D printing, in the same spirit as TinkerCAD. You build parts out of simple shapes, cut holes with other shapes, group things, round the edges, and export a file for your slicer. It runs as a native Windows program — no browser, no account, no internet needed. Everything is in millimetres, Z up.
 
@@ -62,6 +64,10 @@ Fillets are exact-radius, which makes them deliberately slow. Around 32 curve se
 ## Building
 
 On Windows, double-click `build-windows.bat` (or run `setup-windows.ps1`). It installs what is missing (Git, the Visual Studio Build Tools, CMake and Qt) and builds `build\Release\DaedalCAD.exe`. Add `step` for the OpenCASCADE build with exact STEP. See [docs/install.md](docs/install.md) for the options and the manual steps.
+
+## Community
+
+Questions, ideas, or something you made with DaedalCAD? Come say hi on the [Discord server](https://discord.gg/Z8mMTZK6B6).
 
 ## License
 
