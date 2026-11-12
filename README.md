@@ -89,3 +89,19 @@ Questions, ideas, or something you made with DaedalCAD? Come say hi on the [Disc
 DaedalCAD is free software under the GNU General Public License, version 3 ([LICENSE](LICENSE)). Forks and changes are welcome; anything you distribute that is built from this code must be shared under the same license, with its source.
 
 The DaedalSync server in `webapp/` is under the GNU Affero General Public License, version 3. DaedalCAD builds on Qt (LGPL-3.0), Manifold and oneTBB (Apache-2.0), Clipper2 (Boost Software License) and OpenCASCADE (LGPL-2.1 with the Open CASCADE exception). Gridfinity is Zack Freedman's design, under the MIT license. [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) has the details and full license texts.
+
+## Personal notes and AI contribution
+
+DaedalCAD started out as a joke, or rather a test: I wanted to see what I could build with AI-assisted development. It turned into this project.
+
+I'm a developer myself. I've done a lot of web application work (front end, back end, Linux server-side, Proxmox and so on), but apart from a few simple console applications I had never really touched C or C++.
+
+I was a little averse to AI-generated work, and in some ways I still understand why people are. AI use can have significant consequences, and most people have a lot to say about it: about jobs, about where the training data comes from, about energy use. I get it, and I don't want to wave that away. But I have no intention of making any money off this. DaedalCAD is free, open source and stays that way, and for me AI has simply been a very useful tool that let me build something I could never have built on my own in this time.
+
+[Grok Build](https://grok.com) and [Claude](https://claude.ai) really impressed me with what they made possible. I made the initial design wireframes and icons to build on, let Grok and Claude do their thing, and I still do a lot of the testing myself. Every change is in the commit history, so you can see exactly what was made by whom.
+
+DaedalCAD also stands on the work of a lot of people: the authors of [Manifold](https://github.com/elalish/manifold), [Qt](https://www.qt.io/), [Open CASCADE](https://dev.opencascade.org/), [Clipper2](https://github.com/AngusJohnson/Clipper2), [oneTBB](https://github.com/uxlfoundation/oneTBB) and the [Gridfinity](https://www.printables.com/model/417152-gridfinity-specification) system by Zack Freedman. The AI wrote code on top of their years of work, and they deserve the credit for that foundation.
+
+What came out of all this is DaedalCAD. I simply like technology. I have a Bambu P2S at home, and I was missing a fairly complete package for doing cool things with it. Now that the app has turned out to be pretty useful to me, I've decided to share it, in the hope that it's useful to you too.
+
+It's a hobby project, so expect the odd bug. If you find one, have an idea, or made something cool with it, I'd love to hear about it on the [Discord](https://discord.gg/Z8mMTZK6B6).
