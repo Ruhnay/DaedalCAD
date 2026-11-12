@@ -872,9 +872,8 @@ CrossSection filletInsideCorners(CrossSection shape, double radius) {
 
 CrossSection roundSection(CrossSection shape, double edgeR, double surfaceR, int segs, QString* warning) {
   if (shape.IsEmpty()) return shape;
-  // A surface fillet: roll one circle around each
-  // contour of the face, holes included. OpenSCAD writes that as an offset
-  // pair, and the direction picks the corner.
+  // A surface fillet: roll one circle around each contour of the face, holes
+  // included. That is a pair of offsets, and their order picks the corner.
   //   outside tips: shrink with a sharp corner, then grow back round
   //   inside valleys and every hole corner: grow sharp, then shrink back round
   // Outside runs first, so those arcs stay put while the inside pass fills

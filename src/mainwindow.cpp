@@ -5097,7 +5097,7 @@ void MainWindow::showHelp() {
        "left loose on the bed still cut the parts they reach.<br><br>"
        "<b>STL</b> is one merged mesh, for the slicer. <b>OBJ</b> and <b>3MF</b> keep every part (a part on the plate, or a "
        "whole group) as its own named object. <b>DXF</b> puts each part's mesh on its own layer.<br><br>"
-       "<b>STEP</b> is for other CAD programs (Fusion, FreeCAD, SolidWorks, Onshape): every part becomes a closed solid with "
+       "<b>STEP</b> is for other CAD programs: every part becomes a closed solid with "
        "its own name and colour, in millimetres. Boxes, cylinders, cones, tubes, spheres, domes, rings and capsules go in as "
        "true surfaces, and so do the holes, groups, intersections, repeats and closed hollows made of them: in the other "
        "program you can click a hole and read off its diameter, and fillet its edge. Parts imported from a STEP file go back "
