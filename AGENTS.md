@@ -15,7 +15,7 @@ what is technically complete.
 
 ## Rules
 
-- **Version:** stays **0.9.7** (`project(DaedalCAD VERSION …)` in `CMakeLists.txt`) until the
+- **Version:** stays **0.9.8** (`project(DaedalCAD VERSION …)` in `CMakeLists.txt`) until the
   owner says otherwise. Do not bump it as part of a change.
 - **Do not mention other CAD applications, aside from TinkerCAD**, anywhere: code, comments, docs,
   commit messages.
