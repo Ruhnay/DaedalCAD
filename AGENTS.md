@@ -19,8 +19,11 @@ what is technically complete.
   owner says otherwise. Do not bump it as part of a change.
 - **Do not mention other CAD applications, aside from TinkerCAD**, anywhere: code, comments, docs,
   commit messages.
-- **Commits** go to `main` in small, focused steps, each with a clear message saying what changed
-  and why. Sign them if your setup can (the owner wants them shown as Verified on GitHub).
+- **Branches:** `main` is pinned at the last finished state; do not commit to it. Work happens on
+  the `0.9.8` branch, until the owner says otherwise.
+- **Commits** go to that branch in small, focused steps, each with a clear message saying what
+  changed and why. Sign them if your setup can (the owner wants them shown as Verified on GitHub).
+  No attribution or session-link lines (such as Co-Authored-By): the author already shows who made it.
 - **Pull before you start**, and rebase on top of what is there. Never force-push, rewrite history
   or delete branches or tags unless the owner asks for exactly that.
 - **Tags and GitHub releases** are made by the owner.
