@@ -4,7 +4,6 @@
   "storagePath": "/var/lib/daedalsync",
   "usersPath": "",
   "defaultQuota": "5G",
-  "trustProxy": "loopback",
   "adminPort": 5003,
   "adminHost": "0.0.0.0",
   "adminAllow": "private"

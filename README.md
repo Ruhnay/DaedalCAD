@@ -51,7 +51,7 @@ STEP export is available for other CAD programs. With OpenCASCADE (included in t
 
 The view has a view cube, Home, perspective or orthographic, and isometric. Every tool and command has a changeable keyboard shortcut. Projects save as a folder with a daedalcad.json, or you can export a portable .daedal file.
 
-CloudSync is optional — it backs up projects to a DaedalSync server and lets you share designs. The app checks the GitHub releases for new versions (or your own DaedalSync server) and an installed copy updates itself.
+CloudSync is optional — it backs up projects to a DaedalSync server and lets a group share designs; `webapp/README.md` explains how to host one. The app checks the GitHub releases for new versions, and an installed copy updates itself.
 
 ## How it works
 

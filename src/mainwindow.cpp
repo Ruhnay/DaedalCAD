@@ -5392,10 +5392,9 @@ void MainWindow::showHelp() {
        "start it offers to copy the files of an earlier unzipped DaedalCAD there.<br><br>"
        "<b>Portable</b> (unzipped): everything stays in the appdata folder next to DaedalCAD.exe, as before.<br><br>"
        "<b>Updates:</b> a few seconds after start-up DaedalCAD looks for a newer version (File → Check for updates does it right "
-       "away): in the releases on GitHub, or on your own DaedalSync server if you choose that there (it signs in with your "
-       "CloudSync key, or with a download login). An installed copy downloads the new installer, checks it, offers to save your "
-       "project, closes, installs and starts again. A portable copy opens the release or download page instead. Skip this version "
-       "keeps it quiet until the next one."},
+       "away) in DaedalCAD's releases on GitHub. An installed copy downloads the new installer, checks it, offers to save your "
+       "project, closes, installs and starts again. A portable copy opens the release page instead. Skip this version keeps it "
+       "quiet until the next one."},
       {"generators", "Generators",
        "The <b>Generators</b> tab in the library makes parts from a few settings: a box with a lid that fits, Gridfinity bins and "
        "baseplates, a screw jar, an electronics enclosure, a battery holder, bolts and nuts, standoffs for circuit boards, gears, "

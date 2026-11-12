@@ -1,4 +1,4 @@
-// Admin web interface: releases, download logins and sync users, on a port of its own.
+// Admin web interface: sync users and the admin password, on a port of its own.
 //
 // Meant for your own network only. It answers loopback and private addresses (192.168.x.x,
 // 10.x.x.x, 172.16-31.x.x, fc00::/7, link-local) and nothing else, judged by the address that
@@ -11,17 +11,14 @@
 // page on another site cannot add, so other sites cannot make your browser act here.
 import crypto from "crypto";
 import express from "express";
-import fsp from "fs/promises";
 import http from "http";
 import path from "path";
 import { formatBytes, parseBytes } from "./config.js";
-import { HttpError, freeBytes, readJson, receiveUpload, writeJson } from "./files.js";
-import { createReleases, zipFolderVersion } from "./releases.js";
+import { HttpError, freeBytes, readJson, writeJson } from "./files.js";
 
 const SESSION_MS = 12 * 60 * 60 * 1000;
 const LOCK_AFTER = 8;
 const LOCK_MS = 15 * 60 * 1000;
-const UPLOAD_MAX = 4 * 1024 ** 3;
 
 function scrypt(password, salt) {
   return new Promise((resolve, reject) => {
@@ -110,7 +107,6 @@ export function createAdminApp(store, options = {}) {
   const config = store.config;
   const allow = options.allow ?? config.adminAllow ?? "private";
   const auth = createAdminAuth(config);
-  const releases = store.releases || createReleases(config);
   const sessions = new Map();
   const failures = new Map();
   const app = express();
@@ -228,63 +224,6 @@ export function createAdminApp(store, options = {}) {
     res.json({ storage: config.storagePath, freeBytes: free, defaultQuota: formatBytes(config.defaultQuotaBytes) });
   }));
 
-  // --- releases ---
-  app.get("/api/releases", route(async (_req, res) => res.json({ releases: await releases.listReleases() })));
-  // Raw file in the body: POST /api/releases?version=0.7.0&notes=...&replace=1[&kind=installer]
-  // The zip without a version: the one in its folder name (DaedalCAD-0.7.0/) is used.
-  app.post("/api/releases", route(async (req, res) => {
-    const installer = req.query.kind === "installer";
-    let version = String(req.query.version || "").trim();
-    const notes = String(req.query.notes || "");
-    const replace = req.query.replace === "1";
-    const taken = (found) => Boolean(found && (installer ? found.installer : found.file));
-    const what = installer ? "an installer" : "a zip";
-    if (version && !replace && taken((await releases.listReleases()).find((r) => r.version === version)))
-      throw new HttpError(409, `Version ${version} already has ${what}`);
-    if (installer && !version) throw new HttpError(400, "Fill in the version for the installer");
-    const incoming = path.join(config.storagePath, "releases", "incoming");
-    await fsp.mkdir(incoming, { recursive: true });
-    const tmp = path.join(incoming, `${crypto.randomBytes(8).toString("hex")}.${installer ? "exe" : "zip"}`);
-    try {
-      await receiveUpload(req, tmp, {
-        kind: installer ? "exe" : "zip",
-        maxBytes: UPLOAD_MAX,
-        declaredLength: req.get("content-length"),
-        storageRoot: config.storagePath,
-      });
-      if (!version) version = (await zipFolderVersion(tmp)) || "";
-      if (!version) throw new HttpError(400, "No version in that zip. Fill in the version.");
-      if (!replace && taken((await releases.listReleases()).find((r) => r.version === version)))
-        throw new HttpError(409, `Version ${version} already has ${what}`);
-      const entry = installer
-        ? await releases.addInstaller(tmp, version, notes, { move: true, replace })
-        : await releases.addRelease(tmp, version, notes, { move: true, replace });
-      res.status(201).json(entry);
-    } finally {
-      await fsp.rm(tmp, { force: true });
-    }
-  }));
-  app.patch("/api/releases/:version", json, route(async (req, res) => {
-    res.json(await releases.setNotes(req.params.version, String(req.body?.notes ?? "")));
-  }));
-  app.delete("/api/releases/:version", route(async (req, res) => {
-    await releases.removeRelease(req.params.version);
-    res.json({ ok: true });
-  }));
-
-  // --- download logins ---
-  app.get("/api/logins", route(async (_req, res) => res.json({ logins: await releases.listLogins() })));
-  app.post("/api/logins", json, route(async (req, res) => {
-    res.status(201).json(await releases.addLogin(req.body?.name, String(req.body?.password || "")));
-  }));
-  app.post("/api/logins/:name/password", json, route(async (req, res) => {
-    res.json(await releases.setPassword(req.params.name, String(req.body?.password || "")));
-  }));
-  app.delete("/api/logins/:name", route(async (req, res) => {
-    await releases.removeLogin(req.params.name);
-    res.json({ ok: true });
-  }));
-
   // --- sync users ---
   app.get("/api/users", route(async (_req, res) => {
     const users = await store.listUsers();
@@ -365,10 +304,6 @@ const PAGE = String.raw`<!doctype html>
   button.danger:hover { border-color:var(--bad); color:var(--bad); }
   button:disabled { opacity:.5; cursor:default; }
   .actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
-  .drop { border:2px dashed var(--line); border-radius:8px; padding:22px; text-align:center; color:var(--dim); cursor:pointer; }
-  .drop.over { border-color:var(--accent); color:var(--text); }
-  .drop b { color:var(--text); }
-  progress { width:100%; height:10px; accent-color:var(--accent); }
   .secret { background:#0f1318; border:1px solid var(--accent); border-radius:8px; padding:12px 14px; margin:10px 0 16px; }
   .secret code { display:block; font:15px ui-monospace, Consolas, monospace; color:var(--accent); word-break:break-all; margin:6px 0; user-select:all; }
   .secret small { color:var(--dim); }
@@ -389,7 +324,7 @@ const PAGE = String.raw`<!doctype html>
 <body>
 <div id="gate" class="login hidden">
   <h1>DaedalSync admin</h1>
-  <p id="gateText">Log in to manage releases and users.</p>
+  <p id="gateText">Log in to manage the sync users.</p>
   <label>Password <input id="gatePass" type="password" autocomplete="current-password"></label>
   <label id="gateRepeatWrap" class="hidden">Repeat password <input id="gateRepeat" type="password" autocomplete="new-password"></label>
   <button id="gateGo" class="btn primary">Log in</button>
@@ -398,49 +333,17 @@ const PAGE = String.raw`<!doctype html>
 
 <div id="app" class="hidden">
   <header>
-    <h1>Shape<span>Sync</span> admin</h1>
+    <h1>Daedal<span>Sync</span> admin</h1>
     <div class="grow"></div>
     <small id="disk"></small>
     <button class="btn" id="logout">Log out</button>
   </header>
   <nav>
-    <button data-tab="releases" class="on">Releases</button>
-    <button data-tab="logins">Download logins</button>
-    <button data-tab="users">Sync users</button>
+    <button data-tab="users" class="on">Sync users</button>
     <button data-tab="settings">Admin password</button>
   </nav>
   <main>
-    <section id="tab-releases">
-      <h2>Upload a release</h2>
-      <p>What package.ps1 makes: the portable zip and the installer (DaedalCAD-0.7.0-setup.exe). Drop one or both. The version is read from the names; you can change it before uploading. Installed copies update themselves from the installer.</p>
-      <div class="drop" id="drop"><span id="dropText"><b>Drop the zip and/or setup.exe here</b> or click to pick them</span></div>
-      <input id="file" type="file" accept=".zip,.exe" multiple class="hidden">
-      <div class="row" id="uploadForm" style="margin-top:12px">
-        <label>Version <input id="version" type="text" placeholder="0.7.0" size="10"></label>
-        <label style="flex:1; min-width:220px">Notes <input id="notes" type="text" placeholder="What changed (optional)"></label>
-        <label style="flex-direction:row; align-items:center; gap:6px"><input id="replace" type="checkbox"> Replace if it exists</label>
-        <button class="btn primary" id="upload" disabled>Upload</button>
-      </div>
-      <progress id="progress" class="hidden" max="100" value="0"></progress>
-      <div class="msg" id="releaseMsg"></div>
-      <h2 style="margin-top:18px">Versions</h2>
-      <table><thead><tr><th>Version</th><th class="hide">Added</th><th>Files</th><th>Notes</th><th></th></tr></thead><tbody id="releaseRows"></tbody></table>
-    </section>
-
-    <section id="tab-logins" class="hidden">
-      <h2>Download logins</h2>
-      <p>Name and password people use on /downloads. Separate from sync users. Leave the password empty to have one made up.</p>
-      <div class="row">
-        <label>Name <input id="loginName" type="text" placeholder="name"></label>
-        <label>Password <input id="loginPass" type="text" placeholder="(made up when empty)"></label>
-        <button class="btn primary" id="loginAdd">Add login</button>
-      </div>
-      <div id="loginSecret"></div>
-      <div class="msg" id="loginMsg"></div>
-      <table><thead><tr><th>Name</th><th class="hide">Added</th><th></th></tr></thead><tbody id="loginRows"></tbody></table>
-    </section>
-
-    <section id="tab-users" class="hidden">
+    <section id="tab-users">
       <h2>Sync users</h2>
       <p>People who sync projects from DaedalCAD. Each gets a key to paste into CloudSync; it is shown once.</p>
       <div class="row">
@@ -495,7 +398,7 @@ function showGate(setup) {
   setupMode = setup;
   $("app").classList.add("hidden");
   $("gate").classList.remove("hidden");
-  $("gateText").textContent = setup ? "First visit: choose the admin password (8+ characters)." : "Log in to manage releases and users.";
+  $("gateText").textContent = setup ? "First visit: choose the admin password (8+ characters)." : "Log in to manage the sync users.";
   $("gateRepeatWrap").classList.toggle("hidden", !setup);
   $("gateGo").textContent = setup ? "Set password" : "Log in";
   $("gatePass").value = ""; $("gateRepeat").value = ""; $("gatePass").focus();
@@ -517,151 +420,25 @@ for (const id of ["gatePass", "gateRepeat"]) $(id).addEventListener("keydown", (
 $("logout").onclick = async () => { await api("POST", "/api/logout").catch(() => {}); showGate(false); };
 
 // --- tabs ---
-let tab = "releases";
+let tab = "users";
 try { tab = localStorage.getItem("daedalsync-admin-tab") || tab; } catch {}
 function showTab(name) {
   tab = name;
   try { localStorage.setItem("daedalsync-admin-tab", name); } catch {}
   for (const b of document.querySelectorAll("nav button")) b.classList.toggle("on", b.dataset.tab === name);
   for (const s of document.querySelectorAll("main section")) s.classList.toggle("hidden", s.id !== "tab-" + name);
-  ({ releases: loadReleases, logins: loadLogins, users: loadUsers, settings: () => {} })[name]?.();
+  ({ users: loadUsers, settings: () => {} })[name]?.();
 }
 for (const b of document.querySelectorAll("nav button")) b.onclick = () => showTab(b.dataset.tab);
 
 async function openApp() {
   $("gate").classList.add("hidden");
   $("app").classList.remove("hidden");
-  showTab(document.querySelector('nav button[data-tab="' + tab + '"]') ? tab : "releases");
+  showTab(document.querySelector('nav button[data-tab="' + tab + '"]') ? tab : "users");
   try {
     const o = await api("GET", "/api/overview");
     $("disk").textContent = o.freeBytes == null ? "" : size(o.freeBytes) + " free";
   } catch {}
-}
-
-// --- releases ---
-let picked = [];  // [{ file, kind: "zip" | "installer" }]
-const DROP_HINT = "<b>Drop the zip and/or setup.exe here</b> or click to pick them";
-function pick(files) {
-  const list = Array.from(files || []).filter((f) => /\.(zip|exe)$/i.test(f.name));
-  if (!list.length) return say("releaseMsg", "Pick the .zip and/or the setup .exe");
-  picked = list.map((file) => ({ file, kind: /\.exe$/i.test(file.name) ? "installer" : "zip" }));
-  picked.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "zip" ? -1 : 1));
-  for (const { file } of picked) {
-    const m = file.name.match(/(?:DaedalCAD|ShapeSynth)-([0-9A-Za-z._-]+?)-(?:windows|setup)/i);
-    if (m && !$("version").value) $("version").value = m[1];
-  }
-  const zip = picked.find((p) => p.kind === "zip");
-  if (zip && !$("version").value) {
-    // A renamed zip: the version is still in the folder name inside (DaedalCAD-0.7.0/).
-    const file = zip.file;
-    file.slice(Math.max(0, file.size - 1048576)).arrayBuffer().then((buf) => {
-      let text = "";
-      const bytes = new Uint8Array(buf);
-      for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-      const inside = text.match(/(?:DaedalCAD|ShapeSynth)-(\d[0-9A-Za-z._-]{0,38})[\/\\]/);
-      if (inside && picked.some((p) => p.file === file) && !$("version").value) $("version").value = inside[1].replace(/[._-]+$/, "");
-    }).catch(() => {});
-  }
-  $("dropText").innerHTML = picked.map((p) => "<b>" + esc(p.file.name) + "</b> · " + size(p.file.size)).join("<br>") +
-    ' <span class="muted">(click to pick others)</span>';
-  $("upload").disabled = false;
-  say("releaseMsg", "");
-}
-$("drop").onclick = () => $("file").click();
-$("file").onchange = () => pick($("file").files);
-$("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
-$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
-$("drop").addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); pick(e.dataTransfer.files); });
-function sendOne({ file, kind }, version) {
-  return new Promise((resolve, reject) => {
-    const q = new URLSearchParams({ version, notes: $("notes").value, replace: $("replace").checked ? "1" : "0", kind });
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/releases?" + q);
-    xhr.setRequestHeader("X-DaedalSync-Admin", "1");
-    xhr.setRequestHeader("Content-Type", kind === "installer" ? "application/octet-stream" : "application/zip");
-    $("progress").value = 0;
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable) $("progress").value = (100 * e.loaded) / e.total; };
-    xhr.onload = () => {
-      let data = {}; try { data = JSON.parse(xhr.responseText); } catch {}
-      if (xhr.status === 401) { showGate(false); return reject(new Error("Log in again")); }
-      if (xhr.status >= 300) return reject(new Error(file.name + ": " + (data.error || "upload failed")));
-      resolve(data);
-    };
-    xhr.onerror = () => reject(new Error(file.name + ": upload failed (connection)"));
-    xhr.send(file);
-  });
-}
-$("upload").onclick = async () => {
-  if (!picked.length) return say("releaseMsg", "Pick the files first");
-  let version = $("version").value.trim();
-  if (!version && picked.some((p) => p.kind === "installer")) return say("releaseMsg", "Fill in the version");
-  $("progress").classList.remove("hidden"); $("upload").disabled = true;
-  try {
-    let entry = null;
-    for (const p of picked) {
-      say("releaseMsg", "Uploading " + p.file.name + " …", true);
-      entry = await sendOne(p, version);
-      version = entry.version;  // a zip may have told us the version
-    }
-    say("releaseMsg", "Added DaedalCAD " + entry.version + ": " + picked.map((p) => p.kind).join(" and ") + ".", true);
-    picked = []; $("version").value = ""; $("notes").value = ""; $("replace").checked = false;
-    $("dropText").innerHTML = DROP_HINT; $("file").value = "";
-  } catch (e) {
-    say("releaseMsg", e.message);
-    $("upload").disabled = false;
-  } finally {
-    $("progress").classList.add("hidden");
-    if (!picked.length) $("upload").disabled = true;
-    loadReleases();
-  }
-};
-async function loadReleases() {
-  try {
-    const { releases } = await api("GET", "/api/releases");
-    $("releaseRows").innerHTML = releases.length ? releases.map((r, i) =>
-      "<tr><td><b>" + esc(r.version) + "</b>" + (i === 0 ? ' <span class="tag ok">latest</span>' : "") + '</td><td class="hide num">' + esc(r.added.slice(0, 10)) +
-      '</td><td class="num">' + [r.file ? "zip " + size(r.bytes) : "", r.installer ? "installer " + size(r.installer.bytes) : ""].filter(Boolean).join("<br>") +
-      "</td><td>" + esc(r.notes) + '</td><td><div class="actions"><button class="btn" data-notes="' + esc(r.version) +
-      '">Notes</button><button class="btn danger" data-del="' + esc(r.version) + '">Remove</button></div></td></tr>').join("")
-      : '<tr><td colspan="5" class="muted">No versions yet.</td></tr>';
-    for (const b of document.querySelectorAll("[data-del]")) b.onclick = async () => {
-      if (!confirm("Remove DaedalCAD " + b.dataset.del + "? People can no longer download it.")) return;
-      try { await api("DELETE", "/api/releases/" + encodeURIComponent(b.dataset.del)); loadReleases(); } catch (e) { say("releaseMsg", e.message); }
-    };
-    for (const b of document.querySelectorAll("[data-notes]")) b.onclick = async () => {
-      const current = releases.find((r) => r.version === b.dataset.notes)?.notes || "";
-      const notes = prompt("Notes for " + b.dataset.notes, current);
-      if (notes === null) return;
-      try { await api("PATCH", "/api/releases/" + encodeURIComponent(b.dataset.notes), { notes }); loadReleases(); } catch (e) { say("releaseMsg", e.message); }
-    };
-  } catch (e) { say("releaseMsg", e.message); }
-}
-
-// --- download logins ---
-$("loginAdd").onclick = async () => {
-  try {
-    const r = await api("POST", "/api/logins", { name: $("loginName").value, password: $("loginPass").value });
-    secret("loginSecret", "Download login added", [["Name", r.name], ["Password", r.password]]);
-    $("loginName").value = ""; $("loginPass").value = ""; say("loginMsg", ""); loadLogins();
-  } catch (e) { say("loginMsg", e.message); }
-};
-async function loadLogins() {
-  try {
-    const { logins } = await api("GET", "/api/logins");
-    $("loginRows").innerHTML = logins.length ? logins.map((l) =>
-      "<tr><td><b>" + esc(l.name) + '</b></td><td class="hide num">' + esc(l.created.slice(0, 10)) + '</td><td><div class="actions"><button class="btn" data-pw="' +
-      esc(l.name) + '">New password</button><button class="btn danger" data-rm="' + esc(l.name) + '">Remove</button></div></td></tr>').join("")
-      : '<tr><td colspan="3" class="muted">No download logins.</td></tr>';
-    for (const b of document.querySelectorAll("[data-pw]")) b.onclick = async () => {
-      if (!confirm("Make a new password for " + b.dataset.pw + "? The old one stops working.")) return;
-      try { const r = await api("POST", "/api/logins/" + encodeURIComponent(b.dataset.pw) + "/password", {}); secret("loginSecret", "New password", [["Name", r.name], ["Password", r.password]]); }
-      catch (e) { say("loginMsg", e.message); }
-    };
-    for (const b of document.querySelectorAll("[data-rm]")) b.onclick = async () => {
-      if (!confirm("Remove the download login " + b.dataset.rm + "?")) return;
-      try { await api("DELETE", "/api/logins/" + encodeURIComponent(b.dataset.rm)); loadLogins(); } catch (e) { say("loginMsg", e.message); }
-    };
-  } catch (e) { say("loginMsg", e.message); }
 }
 
 // --- sync users ---

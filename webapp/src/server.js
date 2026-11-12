@@ -1,7 +1,6 @@
 import express from "express";
 import fs from "fs";
 import http from "http";
-import { createReleases } from "./releases.js";
 
 function sendError(res, error) {
   const status = error.status || (error.type === "entity.parse.failed" ? 400 : 500);
@@ -25,11 +24,6 @@ function streamFile(res, file, bytes, type, extra = {}) {
 export function createApp(store) {
   const app = express();
   app.disable("x-powered-by");
-  // Behind nginx every request comes from nginx; trust its X-Forwarded-For so req.ip is the real
-  // visitor (the download lockout counts wrong passwords per visitor). Only the proxies named in
-  // the config are believed, so a visitor cannot fake the header when connecting directly.
-  const trust = store.config.trustProxy ?? "loopback";
-  app.set("trust proxy", trust === "none" ? false : trust.split(",").map((t) => t.trim()).filter(Boolean));
   const json = express.json({ limit: "64kb" });
 
   app.get("/", (_req, res) => {
@@ -54,18 +48,7 @@ export function createApp(store) {
     }
   };
 
-  // App downloads (packaged DaedalCAD builds), HTTP Basic auth with download logins.
-  const releases = store.releases || createReleases(store.config);
-  const login = releases.requireLogin();
-  app.get("/downloads", login, route(async (req, res) => releases.listHandler(req, res)));
-  app.get("/download", login, route(async (req, res) => releases.downloadHandler(req, res)));
-  app.get("/downloads/latest", login, route(async (req, res) => releases.latestHandler(req, res)));
-
   app.use("/v1", requireUser);
-
-  // --- app updates with the sync key (DaedalCAD's updater) -----------------------------------
-  app.get("/v1/app/latest", route(async (req, res) => releases.latestHandler(req, res)));
-  app.get("/v1/app/download", route(async (req, res) => releases.downloadHandler(req, res)));
 
   // --- account and personal projects ---------------------------------------------------------
   app.get("/v1/me", route(async (req, res) => res.json(await store.profile(req.user))));

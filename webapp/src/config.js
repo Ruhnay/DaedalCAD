@@ -48,9 +48,6 @@ export function loadConfig(flags = {}) {
   const port = Number(flags.port || env("PORT") || json.port || 5002);
   const host = String(flags.host || env("HOST") || json.host || "127.0.0.1");
   const quotaText = flags.quota || env("QUOTA") || json.defaultQuota || "5G";
-  // Which proxies may tell us the visitor's address (X-Forwarded-For). "loopback": nginx on this
-  // machine. Another machine: its address, e.g. "192.168.1.10". "none": ignore the header.
-  const trustProxy = String(flags["trust-proxy"] || env("TRUST_PROXY") || json.trustProxy || "loopback");
   // Admin web page: its own port, for your own network only (0 turns it off). It listens on all
   // interfaces by default so other machines at home can reach it, and only answers private addresses.
   const adminPort = Number(flags["admin-port"] ?? env("ADMIN_PORT") ?? json.adminPort ?? 5003);
@@ -65,7 +62,6 @@ export function loadConfig(flags = {}) {
     storagePath,
     usersPath,
     defaultQuotaBytes: typeof quotaText === "number" ? quotaText : parseBytes(quotaText),
-    trustProxy,
     adminPort,
     adminHost,
     adminAllow,

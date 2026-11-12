@@ -57,7 +57,6 @@ export function createLocks() {
 const SIGNATURES = {
   zip: { bytes: [0x50, 0x4b], message: "Expected a zip file" },
   png: { bytes: [0x89, 0x50, 0x4e, 0x47], message: "Expected a PNG image" },
-  exe: { bytes: [0x4d, 0x5a], message: "Expected a Windows program (.exe)" },
 };
 
 // Streams a request body into `finalPath`, checking the file signature, the size limit and the
@@ -110,14 +109,4 @@ export async function receiveUpload(source, finalPath, { kind, maxBytes, declare
     await fsp.rm(tmp, { force: true });
     throw error;
   }
-}
-
-export function sha256File(file) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash("sha256");
-    fs.createReadStream(file)
-      .on("data", (chunk) => hash.update(chunk))
-      .on("end", () => resolve(hash.digest("hex")))
-      .on("error", reject);
-  });
 }

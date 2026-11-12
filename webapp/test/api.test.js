@@ -274,80 +274,6 @@ test("public versions count against the owner's quota", async () => {
   });
 });
 
-test("app downloads: basic auth, list versions, download by version", async () => {
-  const { createReleases } = await import("../src/releases.js");
-  await withServer("5G", async (base, store) => {
-    const releases = createReleases(store.config);
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "daedalsync-zip-"));
-    const zipA = path.join(tmp, "DaedalCAD-0.9.0-windows-x64.zip");
-    const zipB = path.join(tmp, "b.zip");
-    await fs.writeFile(zipA, Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(1000, 1)]));
-    await fs.writeFile(zipB, Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(2000, 2)]));
-    await releases.addRelease(zipA, "0.9.0", "first");
-    await releases.addRelease(zipB, "0.10.0", "second");
-    await assert.rejects(releases.addRelease(zipB, "0.10.0"), /already there/);
-    await assert.rejects(releases.addRelease(zipB, "../evil"), /Version must be/);
-    const { password } = await releases.addLogin("Friend");
-    const auth = (user, pass) => ({ authorization: "Basic " + Buffer.from(`${user}:${pass}`).toString("base64") });
-
-    let r = await fetch(`${base}/downloads`);
-    assert.equal(r.status, 401);
-    assert.match(r.headers.get("www-authenticate") || "", /Basic/);
-    r = await fetch(`${base}/downloads`, { headers: auth("friend", "wrong") });
-    assert.equal(r.status, 401);
-
-    r = await fetch(`${base}/downloads`, { headers: { ...auth("Friend", password), accept: "application/json" } });
-    assert.equal(r.status, 200);
-    const list = await r.json();
-    assert.equal(list.latest, "0.10.0");  // 0.10 is newer than 0.9
-    assert.deepEqual(list.versions.map((v) => v.version), ["0.10.0", "0.9.0"]);
-
-    r = await fetch(`${base}/downloads`, { headers: { ...auth("Friend", password), accept: "text/html" } });
-    const page = await r.text();
-    assert.match(page, /download\?version=0\.9\.0/);
-
-    r = await fetch(`${base}/download?version=0.9.0`, { headers: auth("Friend", password) });
-    assert.equal(r.status, 200);
-    assert.equal(r.headers.get("content-type"), "application/zip");
-    assert.match(r.headers.get("content-disposition"), /DaedalCAD-0\.9\.0-windows-x64\.zip/);
-    assert.equal((await r.arrayBuffer()).byteLength, 1004);
-
-    r = await fetch(`${base}/download`, { headers: auth("Friend", password) });
-    assert.equal(r.headers.get("x-version"), "0.10.0");
-    assert.equal((await r.arrayBuffer()).byteLength, 2004);
-
-    r = await fetch(`${base}/download?version=0.1.0`, { headers: auth("Friend", password) });
-    assert.equal(r.status, 404);
-    r = await fetch(`${base}/download?version=..%2F..%2Fusers.json`, { headers: auth("Friend", password) });
-    assert.equal(r.status, 404);
-
-    // A CloudSync key is not a download login, and a removed login stops working.
-    await releases.removeLogin("Friend");
-    r = await fetch(`${base}/downloads`, { headers: auth("Friend", password) });
-    assert.equal(r.status, 401);
-    await fs.rm(tmp, { recursive: true, force: true });
-  });
-});
-
-test("download lockout counts the visitor nginx forwards, not nginx", async () => {
-  const { createReleases } = await import("../src/releases.js");
-  await withServer("5G", async (base, store) => {
-    const releases = createReleases(store.config);
-    const { password } = await releases.addLogin("Friend");
-    const auth = (pass, ip) => ({
-      authorization: "Basic " + Buffer.from(`Friend:${pass}`).toString("base64"),
-      "x-forwarded-for": ip,
-    });
-    // One visitor guesses wrong ten times and gets locked out...
-    for (let i = 0; i < 10; i++) await fetch(`${base}/downloads`, { headers: auth("wrong", "203.0.113.5") });
-    let r = await fetch(`${base}/downloads`, { headers: auth(password, "203.0.113.5") });
-    assert.equal(r.status, 429);
-    // ...while another visitor through the same nginx still gets in.
-    r = await fetch(`${base}/downloads`, { headers: { ...auth(password, "198.51.100.7"), accept: "application/json" } });
-    assert.equal(r.status, 200);
-  });
-});
-
 test("admin page: only private addresses", async () => {
   const { addressAllowed } = await import("../src/admin.js");
   for (const ip of ["127.0.0.1", "::1", "::ffff:192.168.1.20", "10.1.2.3", "172.16.0.9", "172.31.255.1", "fd12:3456::1", "fe80::1"])
@@ -358,7 +284,7 @@ test("admin page: only private addresses", async () => {
   assert.equal(addressAllowed("192.168.1.5", "192.168.1.0/24"), true);
 });
 
-test("admin page: setup, login, users, logins, release upload", async () => {
+test("admin page: setup, login, users", async () => {
   const { createAdminApp } = await import("../src/admin.js");
   await withServer("5G", async (base, store) => {
     const admin = createAdminApp(store);
@@ -412,38 +338,13 @@ test("admin page: setup, login, users, logins, release upload", async () => {
       await ask("POST", "/api/users/Bob/revoke");
       assert.equal((await call(base, "GET", "/v1/me", { key: rotated.json.key })).status, 401, "revoked");
 
-      // Download logins and a release upload, then a real download on the public port.
-      const login = await ask("POST", "/api/logins", { body: { name: "friend" } });
-      assert.equal(login.status, 201);
-      assert.ok(login.json.password.length >= 12);
-      const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(5000, 7)]);
-      assert.equal((await ask("POST", "/api/releases?version=0.8.0", { body: Buffer.from("not a zip"), raw: true })).status, 400);
-      const up = await ask("POST", "/api/releases?version=0.8.0&notes=Twist%20tool", { body: zip, raw: true });
-      assert.equal(up.status, 201, up.text);
-      assert.equal(up.json.bytes, zip.length);
-      assert.equal((await ask("POST", "/api/releases?version=0.8.0", { body: zip, raw: true })).status, 409, "no silent replace");
-      const bigger = Buffer.concat([zip, Buffer.alloc(100, 1)]);
-      assert.equal((await ask("POST", "/api/releases?version=0.8.0&replace=1", { body: bigger, raw: true })).json.bytes, bigger.length);
-      assert.equal((await ask("PATCH", "/api/releases/0.8.0", { body: { notes: "Twist and levels" } })).json.notes, "Twist and levels");
-      const auth = "Basic " + Buffer.from(`friend:${login.json.password}`).toString("base64");
-      const dl = await fetch(base + "/download?version=0.8.0", { headers: { authorization: auth } });
-      assert.equal(dl.status, 200);
-      assert.equal(Buffer.from(await dl.arrayBuffer()).length, bigger.length);
-      const incoming = await fs.readdir(path.join(store.config.storagePath, "releases", "incoming"));
-      assert.deepEqual(incoming, [], "no upload leftovers");
-      // DaedalCAD_Release.zip: no version given, it comes from the folder inside.
-      const named = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(300, 1), Buffer.from("DaedalCAD-1.2.3/DaedalCAD.exe")]);
-      const auto = await ask("POST", "/api/releases", { body: named, raw: true });
-      assert.equal(auto.status, 201, auto.text);
-      assert.equal(auto.json.version, "1.2.3");
-      assert.equal((await ask("POST", "/api/releases", { body: named, raw: true })).status, 409, "same version again");
-      const bare = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(300, 1)]);
-      assert.equal((await ask("POST", "/api/releases", { body: bare, raw: true })).status, 400, "no version anywhere");
-      assert.equal((await ask("DELETE", "/api/releases/1.2.3")).status, 200);
-      assert.equal((await ask("DELETE", "/api/releases/0.8.0")).status, 200);
-      assert.equal((await ask("GET", "/api/releases")).json.releases.length, 0);
+      // No download center any more: those routes are gone, on both ports.
+      assert.equal((await ask("GET", "/api/releases")).status, 404);
+      assert.equal((await ask("GET", "/api/logins")).status, 404);
+      for (const gone of ["/downloads", "/download", "/downloads/latest"]) assert.equal((await fetch(base + gone)).status, 404, gone);
+      assert.equal((await call(base, "GET", "/v1/app/latest", { key: (await ask("POST", "/api/users", { body: { name: "Cy" } })).json.key })).status, 404);
       await ask("POST", "/api/logout");
-      assert.equal((await ask("GET", "/api/releases")).status, 401, "logged out");
+      assert.equal((await ask("GET", "/api/users")).status, 401, "logged out");
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -456,95 +357,6 @@ test("admin page: setup, login, users, logins, release upload", async () => {
       assert.equal((await fetch(`http://127.0.0.1:${s2.address().port}/`)).status, 403);
     } finally {
       await new Promise((resolve) => s2.close(resolve));
-    }
-  });
-});
-
-test("app updates: installer next to the zip, latest and download with the sync key", async () => {
-  const { createAdminApp } = await import("../src/admin.js");
-  await withServer("5G", async (base, store) => {
-    const admin = createAdminApp(store);
-    const server = await new Promise((resolve) => {
-      const s = admin.listen(0, "127.0.0.1", () => resolve(s));
-    });
-    const adminBase = `http://127.0.0.1:${server.address().port}`;
-    let cookie = "";
-    const ask = async (method, url, body, type) => {
-      const headers = { "x-daedalsync-admin": "1" };
-      if (cookie) headers.cookie = cookie;
-      if (body !== undefined) headers["content-type"] = type || "application/json";
-      const res = await fetch(adminBase + url, { method, headers, body: type || body === undefined ? body : JSON.stringify(body) });
-      const set = res.headers.get("set-cookie");
-      if (set) cookie = set.split(";")[0];
-      const text = await res.text();
-      let json = null;
-      try {
-        json = JSON.parse(text);
-      } catch {}
-      return { status: res.status, json, text };
-    };
-    try {
-      await ask("POST", "/api/setup", { password: "correct horse" });
-      const { key } = (await ask("POST", "/api/users", { name: "Ann" })).json;
-      const exe = (n) => Buffer.concat([Buffer.from("MZ"), Buffer.alloc(n, 3)]);
-      const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(400, 1), Buffer.from("DaedalCAD-0.9.0/DaedalCAD.exe")]);
-
-      assert.equal((await call(base, "GET", "/v1/app/latest")).status, 401, "needs a key");
-      assert.deepEqual((await call(base, "GET", "/v1/app/latest", { key })).json, { version: null });
-
-      // Installer first (no zip yet), then the zip for the same version.
-      assert.equal((await ask("POST", "/api/releases?kind=installer", exe(10), "application/octet-stream")).status, 400, "installer needs a version");
-      assert.equal((await ask("POST", "/api/releases?kind=installer&version=0.9.0", zip, "application/octet-stream")).status, 400, "not an exe");
-      const inst = await ask("POST", "/api/releases?kind=installer&version=0.9.0&notes=Twist", exe(2000), "application/octet-stream");
-      assert.equal(inst.status, 201, inst.text);
-      assert.equal(inst.json.installer.bytes, 2002);
-      assert.equal(inst.json.file, undefined);
-      const z = await ask("POST", "/api/releases", zip, "application/zip");
-      assert.equal(z.status, 201, z.text);
-      assert.equal(z.json.version, "0.9.0");
-      assert.ok(z.json.file && z.json.installer, "both files on one version");
-      assert.equal((await ask("POST", "/api/releases?kind=installer&version=0.9.0", exe(10), "application/octet-stream")).status, 409);
-      const swapped = await ask("POST", "/api/releases?kind=installer&version=0.9.0&replace=1", exe(3000), "application/octet-stream");
-      assert.equal(swapped.json.installer.bytes, 3002);
-
-      // An older version with only a zip.
-      const older = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(50, 2), Buffer.from("ShapeSynth-0.8.0/x") /* the old name is still recognised */]);
-      assert.equal((await ask("POST", "/api/releases", older, "application/zip")).json.version, "0.8.0");
-
-      const latest = (await call(base, "GET", "/v1/app/latest", { key })).json;
-      assert.equal(latest.version, "0.9.0");
-      assert.equal(latest.notes, "Twist");
-      assert.equal(latest.installer.bytes, 3002);
-      assert.match(latest.installer.sha256, /^[0-9a-f]{64}$/);
-      assert.equal(latest.zip.bytes, zip.length);
-
-      const got = await call(base, "GET", "/v1/app/download?version=0.9.0&kind=installer", { key });
-      assert.equal(got.status, 200);
-      assert.equal(got.buffer.length, 3002);
-      assert.equal(got.headers.get("x-sha256"), latest.installer.sha256);
-      assert.equal(got.headers.get("x-version"), "0.9.0");
-      assert.equal((await call(base, "GET", "/v1/app/download?version=0.8.0&kind=installer", { key })).status, 404, "0.8.0 has no installer");
-      assert.equal((await call(base, "GET", "/v1/app/download?version=0.8.0", { key })).buffer.length, older.length);
-
-      // Download logins see both too.
-      const login = (await ask("POST", "/api/logins", { name: "pal" })).json;
-      const auth = { authorization: "Basic " + Buffer.from(`pal:${login.password}`).toString("base64") };
-      const list = await (await fetch(base + "/downloads", { headers: { ...auth, accept: "application/json" } })).json();
-      assert.equal(list.versions[0].installer.url, "download?version=0.9.0&kind=installer");
-      assert.equal(list.versions[1].installer, null);
-      const page = await (await fetch(base + "/downloads", { headers: { ...auth, accept: "text/html" } })).text();
-      assert.match(page, /Installer/);
-      assert.equal((await fetch(base + "/downloads/latest", { headers: auth }).then((r) => r.json())).version, "0.9.0");
-      const exeDl = await fetch(base + "/download?kind=installer", { headers: auth });
-      assert.equal(exeDl.status, 200);
-      assert.equal(exeDl.headers.get("x-version"), "0.9.0");
-
-      // Removing a version removes both files.
-      await ask("DELETE", "/api/releases/0.9.0");
-      const left = await fs.readdir(path.join(store.config.storagePath, "releases", "files"));
-      assert.deepEqual(left.sort(), ["DaedalCAD-0.8.0-windows-x64.zip"]);
-    } finally {
-      await new Promise((resolve) => server.close(resolve));
     }
   });
 });
