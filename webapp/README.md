@@ -13,6 +13,7 @@ Copy `config.example.json` to `config.json`.
 | `storagePath` | Folder on disk. Each user gets `users/<id>/` under it. |
 | `usersPath` | Optional separate file for the user list. Empty means `storagePath/users.json`. |
 | `defaultQuota` | Per-user cap for new keys, such as `5G` or `500M`. |
+| `trustProxy` | Which proxy's `X-Forwarded-For` to believe. Default `loopback`; see nginx below. |
 | `adminPort` | Admin web page port. Default `5003`; `0` turns it off. |
 | `adminHost` | Admin page bind address. Default `0.0.0.0`, so other machines at home can reach it. |
 | `adminAllow` | Who the admin page answers: `private` (default: loopback and home-network addresses) or a list such as `"192.168.1.0/24, 127.0.0.1"`. |

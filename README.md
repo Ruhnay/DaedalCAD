@@ -22,17 +22,17 @@ Merge turns a group into one solid part so it draws and picks as the finished sh
 
 Fillet rounds outside corners. Fillet surface rounds the edges of a face you click (pocket rims, tube ends, etc.). Detected Edge Filleting (still beta) finds sharp edges on anything — including merged groups, STLs and text — and lets you round or chamfer the ones you pick.
 
-Hollow turns a part or group into a shell with even walls. Lattice turns something into a Voronoi skin, gyroid, honeycomb or Voronoi lattice (open or with a solid skin). It builds in the background on all cores, shows a progress bar with a Stop button, and smooths the result onto the true surface so slicers accept it.
+Hollow turns a part or group into a shell with even walls. Lattice turns something into a Voronoi skin, gyroid, honeycomb, Voronoi lattice, sponge (open or as sponge walls) or bubbles, open or with a solid skin. It builds in the background on all cores, shows a progress bar with a Stop button, and smooths the result onto the true surface so slicers accept it.
 
 Texture applies knurling, ribs, hexagons, dots, wood grain, leather, carbon weave or your own picture as real geometry, raised or cut in, wrapped around or from every side, leaving the bottom flat. Wrap puts text or a logo onto a curved surface. Articulate cuts a part into segments with print-in-place joints so you can print a flexi dragon or snake flat.
 
-Simplify reduces triangle count on heavy sculpts or STLs within a tolerance you set. Restyle rebuilds something low-poly or from voxel cubes. Smooth join is a group setting that makes parts blend into each other like clay. Bend wraps a part into an arc; there are also Bend face and Extrude face tools.
+Simplify reduces triangle count on heavy sculpts or STLs within a tolerance you set. Restyle rebuilds something low-poly or from voxel cubes. Smooth join is a group setting that makes parts blend into each other like clay. Bend wraps a part into an arc, or closes it into a ring at 360°; Twist wrings it and Taper makes one end narrower or wider. There are also Bend face and Extrude face tools. Mold makes a two-piece casting mould of a part, with a pour hole, air vents and keys.
 
 ## Sculpting
 
 There’s a separate Sculpt window (similar to Blender’s Sculpt Mode). Start from a ball, cube, cylinder, slab or capsule, or sculpt an existing part. Brushes include Draw, Clay, Layer, Inflate, Blob, Crease, Smooth, Flatten, Fill, Scrape, Grab, Snake hook, Pinch, Nudge, Rotate, Mask and Stamp. Ctrl reverses the brush, Shift smooths, and you can mirror or use radial symmetry. The surface stays a closed solid — strokes that would push it through itself are held back. Remesh rebuilds even triangles at the detail you want. When you’re done you can replace the selected part or add the sculpt next to it; double-click a sculpted part to keep working on it. You can also save sculpts to a library.
 
-Any cylinder can be an ISO metric thread (M2–M36), either as a threaded rod or as a threaded hole. Text uses any font installed on the computer, with style, size, spacing, alignment and curve quality.
+Any cylinder can be an ISO metric thread (M2–M36), either as a threaded rod or as a threaded hole. Text uses any font installed on the computer, with style, size, spacing, alignment and curve quality, and can run along a curve (over the top or along the bottom).
 
 ## Libraries
 
@@ -58,6 +58,10 @@ CloudSync is optional — it backs up projects to a DaedalSync server and lets y
 The scene is a flat list of nodes (shapes, holes, groups, text, 2D shapes, imported meshes, generators). The evaluator turns each into a Manifold solid, subtracts holes and merges groups, then applies fillets, bends and edge fillets. Results are cached so only changed parts rebuild. Heavy work runs in the background while the window stays responsive, and Manifold uses all cores for booleans. Groups that only assemble parts (no holes or group-level operations) draw straight from their parts, so grouping many overlapping pieces is instant; the real merge happens on export. The status bar shows the app’s own CPU and memory use.
 
 Fillets are exact-radius, which makes them deliberately slow. Around 32 curve segments and 12 fillet segments is a reasonable balance. If a fillet is bigger than the part, it stays sharp.
+
+## Building
+
+On Windows, double-click `build-windows.bat` (or run `setup-windows.ps1`). It installs what is missing (Git, the Visual Studio Build Tools, CMake and Qt) and builds `build\Release\DaedalCAD.exe`. Add `step` for the OpenCASCADE build with exact STEP. See [docs/install.md](docs/install.md) for the options and the manual steps.
 
 ## License
 
