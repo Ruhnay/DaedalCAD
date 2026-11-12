@@ -2,7 +2,7 @@
 
 <p align="center"><b>A free, open-source TinkerCAD alternative for 3D printing, right on your desktop.</b></p>
 
-<p align="center"><a href="https://discord.gg/Z8mMTZK6B6"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&amp;logoColor=white" alt="Join the DaedalCAD Discord server"></a></p>
+<p align="center"><a href="https://daedalcad.com"><img src="https://img.shields.io/badge/Website-daedalcad.com-e87400" alt="The DaedalCAD website, daedalcad.com"></a> <a href="https://discord.gg/Z8mMTZK6B6"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&amp;logoColor=white" alt="Join the DaedalCAD Discord server"></a></p>
 
 DaedalCAD is a desktop 3D modeller for 3D printing, in the same spirit as TinkerCAD. Stack simple shapes, cut holes with other shapes, round off the edges, and send the result to your slicer. It runs as a native Windows program: no browser, no account, and no internet needed to design. Everything is in millimetres, with Z up.
 
@@ -84,7 +84,7 @@ On Windows, double-click `build-windows.bat` (or run `setup-windows.ps1`). It in
 
 ## Community
 
-Questions, ideas, or something you made with DaedalCAD? Come say hi on the [Discord server](https://discord.gg/Z8mMTZK6B6).
+Questions, ideas, or something you made with DaedalCAD? Come say hi on the [Discord server](https://discord.gg/Z8mMTZK6B6). Downloads, screenshots and news are on [daedalcad.com](https://daedalcad.com).
 
 ## License
 
