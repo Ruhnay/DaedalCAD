@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDialog>
@@ -14,6 +15,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -39,6 +41,9 @@
 
 #ifndef DAEDALCAD_VERSION
 #define DAEDALCAD_VERSION "0.0.0"
+#endif
+#ifndef DAEDALCAD_GITHUB_REPO
+#define DAEDALCAD_GITHUB_REPO ""
 #endif
 
 int compareVersions(const QString& a, const QString& b) {
@@ -76,7 +81,19 @@ QString hostUrl(QString host) {
   return withScheme(host);
 }
 
+QString githubRepo() { return QStringLiteral(DAEDALCAD_GITHUB_REPO).trimmed(); }
+
+// "github" or "server". Before there was a choice, a server filled in for updates was the source,
+// so such a setting stays with it until it is changed.
+QString updateSource() {
+  QSettings settings;
+  const QString chosen = settings.value(QStringLiteral("updateSource")).toString();
+  if (chosen == QLatin1String("github") || chosen == QLatin1String("server")) return chosen;
+  return settings.value(QStringLiteral("updateHost")).toString().trimmed().isEmpty() ? QStringLiteral("github") : QStringLiteral("server");
+}
+
 struct Server {
+  bool github = false;
   QString host;
   QByteArray auth;
   QString latestPath;
@@ -90,6 +107,16 @@ struct Server {
 Server server() {
   QSettings settings;
   Server out;
+  if (updateSource() == QLatin1String("github")) {
+    out.github = true;
+    // DAEDALCAD_GITHUB_API points the check at a stand-in for api.github.com (for testing).
+    const QString api = qEnvironmentVariable("DAEDALCAD_GITHUB_API").trimmed();
+    out.host = api.isEmpty() ? QStringLiteral("https://api.github.com") : hostUrl(api);
+    out.latestPath = QStringLiteral("/repos/%1/releases/latest").arg(githubRepo());
+    out.how = QStringLiteral("from GitHub releases");
+    if (githubRepo().isEmpty()) out.problem = QStringLiteral("This build has no GitHub repository for updates. Choose your DaedalSync server instead.");
+    return out;
+  }
   out.host = hostUrl(settings.value(QStringLiteral("updateHost")).toString());
   if (out.host.isEmpty()) out.host = hostUrl(settings.value(QStringLiteral("cloudHost")).toString());
   const QString key = settings.value(QStringLiteral("cloudKey")).toString().trimmed();
@@ -117,14 +144,26 @@ QNetworkRequest requestFor(const Server& s, const QString& path, const QUrlQuery
   QUrl url(s.host + path);
   url.setQuery(query);
   QNetworkRequest request(url);
-  request.setRawHeader("Authorization", s.auth);
+  if (!s.auth.isEmpty()) request.setRawHeader("Authorization", s.auth);
+  request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DaedalCAD/%1").arg(currentAppVersion()));
+  if (s.github) {
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setRawHeader("X-GitHub-Api-Version", "2022-11-28");
+  }
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setTransferTimeout(30000);
   return request;
 }
 
-QString serverError(QNetworkReply* reply, const QByteArray& body) {
+QString serverError(QNetworkReply* reply, const QByteArray& body, bool github = false) {
   const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+  if (github) {
+    if (status == 404) return QStringLiteral("There is no release on GitHub yet, or the repository is not public.");
+    if (status == 403 || status == 429)
+      return QStringLiteral("GitHub's limit on update checks from this network is reached for now. Try again in an hour.");
+    if (status == 0) return QStringLiteral("Could not reach GitHub (%1).").arg(reply->errorString());
+    return QStringLiteral("GitHub answered %1.").arg(status);
+  }
   const QString message = QJsonDocument::fromJson(body).object().value(QStringLiteral("error")).toString();
   if (status == 401) return QStringLiteral("The server did not accept the key or login.");
   if (status == 429) return QStringLiteral("Too many wrong passwords. Try again later.");
@@ -133,12 +172,21 @@ QString serverError(QNetworkReply* reply, const QByteArray& body) {
   return QStringLiteral("The server answered %1.").arg(status);
 }
 
+// It ends up in a file name: only what a version looks like (no slashes or dots-only names).
+QString checkedVersion(const QString& version) {
+  static const QRegularExpression versionShape(QStringLiteral("^[0-9A-Za-z][0-9A-Za-z._-]{0,39}$"));
+  if (!versionShape.match(version).hasMatch() || version.contains(QStringLiteral(".."))) return {};
+  return version;
+}
+
+// Only https, or a stand-in on the local network.
+bool safeDownloadUrl(const QString& url) {
+  return url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive) || isLocalNetworkHost(url);
+}
+
 UpdateInfo parseInfo(const QJsonObject& o) {
   UpdateInfo info;
-  info.version = o.value(QStringLiteral("version")).toString();
-  // It ends up in a file name: only what a version looks like (no slashes or dots-only names).
-  static const QRegularExpression versionShape(QStringLiteral("^[0-9A-Za-z][0-9A-Za-z._-]{0,39}$"));
-  if (!versionShape.match(info.version).hasMatch() || info.version.contains(QStringLiteral(".."))) info.version.clear();
+  info.version = checkedVersion(o.value(QStringLiteral("version")).toString());
   info.notes = o.value(QStringLiteral("notes")).toString();
   info.added = o.value(QStringLiteral("added")).toString().left(10);
   const QJsonObject installer = o.value(QStringLiteral("installer")).toObject();
@@ -149,19 +197,54 @@ UpdateInfo parseInfo(const QJsonObject& o) {
   return info;
 }
 
+// A GitHub release: the tag is the version, the text the notes, the setup.exe asset the installer
+// (only with the SHA-256 GitHub lists for it, so it can be checked).
+UpdateInfo parseGithubRelease(const QJsonObject& o) {
+  UpdateInfo info;
+  QString tag = o.value(QStringLiteral("tag_name")).toString().trimmed();
+  if (tag.startsWith(QLatin1Char('v'), Qt::CaseInsensitive)) tag.remove(0, 1);
+  info.version = checkedVersion(tag);
+  info.notes = o.value(QStringLiteral("body")).toString().trimmed();
+  info.added = o.value(QStringLiteral("published_at")).toString().left(10);
+  info.pageUrl = o.value(QStringLiteral("html_url")).toString();
+  if (!info.pageUrl.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive) && !isLocalNetworkHost(info.pageUrl)) info.pageUrl.clear();
+  if (info.version.isEmpty()) return info;
+  const QString wanted = QStringLiteral("DaedalCAD-%1-setup.exe").arg(info.version);
+  QJsonObject installer;
+  for (const QJsonValue& value : o.value(QStringLiteral("assets")).toArray()) {
+    const QJsonObject asset = value.toObject();
+    const QString name = asset.value(QStringLiteral("name")).toString();
+    if (name.compare(wanted, Qt::CaseInsensitive) == 0) installer = asset;
+    else if (installer.isEmpty() && name.endsWith(QStringLiteral("-setup.exe"), Qt::CaseInsensitive)) installer = asset;
+    if (name.endsWith(QStringLiteral("-windows-x64.zip"), Qt::CaseInsensitive)) info.hasZip = true;
+  }
+  const QString digest = installer.value(QStringLiteral("digest")).toString();
+  const QString url = installer.value(QStringLiteral("browser_download_url")).toString();
+  static const QRegularExpression sha256Shape(QStringLiteral("^sha256:([0-9a-fA-F]{64})$"));
+  const QRegularExpressionMatch match = sha256Shape.match(digest);
+  if (match.hasMatch() && safeDownloadUrl(url)) {
+    info.hasInstaller = true;
+    info.installerSha256 = match.captured(1).toLower();
+    info.installerBytes = static_cast<qint64>(installer.value(QStringLiteral("size")).toDouble());
+    info.installerUrl = url;
+  }
+  return info;
+}
+
 // Asks for the newest version; calls back on the GUI thread.
 void fetchLatest(QObject* context, const Server& s, std::function<void(bool ok, UpdateInfo info, QString error)> done) {
   auto* manager = new QNetworkAccessManager(context);
   QNetworkReply* reply = manager->get(requestFor(s, s.latestPath));
-  QObject::connect(reply, &QNetworkReply::finished, context, [manager, reply, done] {
+  const bool github = s.github;
+  QObject::connect(reply, &QNetworkReply::finished, context, [manager, reply, done, github] {
     const QByteArray body = reply->readAll();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (status == 200) {
       const QJsonDocument json = QJsonDocument::fromJson(body);
-      if (json.isObject()) done(true, parseInfo(json.object()), {});
-      else done(false, {}, QStringLiteral("The server sent something unexpected."));
+      if (json.isObject()) done(true, github ? parseGithubRelease(json.object()) : parseInfo(json.object()), {});
+      else done(false, {}, github ? QStringLiteral("GitHub sent something unexpected.") : QStringLiteral("The server sent something unexpected."));
     } else {
-      done(false, {}, serverError(reply, body));
+      done(false, {}, serverError(reply, body, github));
     }
     reply->deleteLater();
     manager->deleteLater();
@@ -195,7 +278,13 @@ class UpdatesDialog : public QDialog {
                              .arg(currentAppVersion()));
     layout->addWidget(intro);
 
-    auto* form = new QFormLayout();
+    form = new QFormLayout();
+    sourceBox = new QComboBox(this);
+    sourceBox->addItem(QStringLiteral("GitHub releases"), QStringLiteral("github"));
+    sourceBox->addItem(QStringLiteral("My DaedalSync server"), QStringLiteral("server"));
+    sourceBox->setCurrentIndex(updateSource() == QLatin1String("github") ? 0 : 1);
+    if (githubRepo().isEmpty()) sourceBox->setCurrentIndex(1);
+    form->addRow(QStringLiteral("Get updates from"), sourceBox);
     hostEdit = new QLineEdit(settings.value(QStringLiteral("updateHost")).toString(), this);
     hostEdit->setPlaceholderText(settings.value(QStringLiteral("cloudHost")).toString().isEmpty()
                                      ? QStringLiteral("https://your-server")
@@ -260,6 +349,13 @@ class UpdatesDialog : public QDialog {
     });
     for (QLineEdit* edit : {hostEdit, loginEdit, passwordEdit}) connect(edit, &QLineEdit::textEdited, this, [this] { save(); });
     connect(atStart, &QCheckBox::toggled, this, [this] { save(); });
+    connect(sourceBox, &QComboBox::currentIndexChanged, this, [this] {
+      save();
+      result->clear();
+      notes->hide();
+      installButton->hide();
+      skipButton->hide();
+    });
     save();
   }
 
@@ -271,7 +367,7 @@ class UpdatesDialog : public QDialog {
       return;
     }
     checkButton->setEnabled(false);
-    result->setText(QStringLiteral("Asking %1 …").arg(s.host.toHtmlEscaped()));
+    result->setText(s.github ? QStringLiteral("Asking GitHub …") : QStringLiteral("Asking %1 …").arg(s.host.toHtmlEscaped()));
     QPointer<UpdatesDialog> self(this);
     fetchLatest(this, s, [self, thenInstall](bool ok, UpdateInfo latest, QString error) {
       if (!self) return;
@@ -292,9 +388,15 @@ class UpdatesDialog : public QDialog {
     settings.setValue(QStringLiteral("updateLogin"), loginEdit->text().trimmed());
     settings.setValue(QStringLiteral("updatePassword"), passwordEdit->text());
     settings.setValue(QStringLiteral("updateCheckAtStart"), atStart->isChecked());
+    settings.setValue(QStringLiteral("updateSource"), sourceBox->currentData().toString());
+    const bool github = sourceBox->currentData().toString() == QLatin1String("github");
     const bool key = !settings.value(QStringLiteral("cloudKey")).toString().trimmed().isEmpty();
-    keyNote->setText(key ? QStringLiteral("Signs in with your CloudSync key; no download login needed.")
-                         : QStringLiteral("No CloudSync key here: sign in with a download login (the name and password for the downloads page)."));
+    if (github)
+      keyNote->setText(QStringLiteral("The releases on github.com/%1. No login needed.").arg(githubRepo().toHtmlEscaped()));
+    else
+      keyNote->setText(key ? QStringLiteral("Signs in with your CloudSync key; no download login needed.")
+                           : QStringLiteral("No CloudSync key here: sign in with a download login (the name and password for the downloads page)."));
+    for (QLineEdit* edit : {hostEdit, loginEdit, passwordEdit}) form->setRowVisible(edit, !github);
     loginEdit->setEnabled(!key);
     passwordEdit->setEnabled(!key);
   }
@@ -304,8 +406,10 @@ class UpdatesDialog : public QDialog {
     notes->hide();
     installButton->hide();
     skipButton->hide();
+    const bool github = !info.pageUrl.isEmpty();
     if (info.version.isEmpty()) {
-      result->setText(QStringLiteral("The server has no versions yet."));
+      result->setText(github ? QStringLiteral("The latest GitHub release has a tag that is not a version (such as v0.9.8).")
+                             : QStringLiteral("The server has no versions yet."));
       return;
     }
     if (compareVersions(info.version, currentAppVersion()) <= 0) {
@@ -316,26 +420,31 @@ class UpdatesDialog : public QDialog {
                        .arg(info.version.toHtmlEscaped(), info.added.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(info.added),
                             currentAppVersion().toHtmlEscaped());
     if (isInstalledCopy() && !info.hasInstaller)
-      text += QStringLiteral("<br>There is no installer for it on the server yet, so it cannot update itself. Upload the setup.exe on the admin page.");
+      text += github ? QStringLiteral("<br>The release has no DaedalCAD-%1-setup.exe that GitHub lists a checksum for, so it cannot update "
+                                      "itself. Download it from the release page.")
+                           .arg(info.version.toHtmlEscaped())
+                     : QStringLiteral("<br>There is no installer for it on the server yet, so it cannot update itself. Upload the setup.exe on the admin page.");
     result->setText(text);
     if (!info.notes.isEmpty()) {
       notes->setPlainText(info.notes);
       notes->show();
     }
-    installButton->setVisible(!isInstalledCopy() || info.hasInstaller);
+    installButton->setVisible(!isInstalledCopy() || info.hasInstaller || github);
     if (isInstalledCopy() && info.hasInstaller) installButton->setText(QStringLiteral("Install update (%1)").arg(mb(info.installerBytes)));
+    else installButton->setText(github ? QStringLiteral("Open release page") : QStringLiteral("Open download page"));
     skipButton->show();
   }
 
   void install() {
     const Server s = server();
-    if (!isInstalledCopy()) {
-      QDesktopServices::openUrl(QUrl(s.host + QStringLiteral("/downloads")));
+    if (!isInstalledCopy() || !info.hasInstaller) {
+      if (!info.pageUrl.isEmpty()) QDesktopServices::openUrl(QUrl(info.pageUrl));
+      else if (!s.github) QDesktopServices::openUrl(QUrl(s.host + QStringLiteral("/downloads")));
       return;
     }
-    // The checksum comes from the same server as the installer, so over plain http anyone on the
+    // The checksum comes from the same place as the installer, so over plain http anyone on the
     // way could swap both. Only run installers fetched over https, or from the local network.
-    if (!s.host.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive) && !isLocalNetworkHost(s.host)) {
+    if (!s.github && !safeDownloadUrl(s.host)) {
       result->setText(QStringLiteral("Updates are only installed over https. Change the server address to https://… "
                                      "(your proxy's SSL address), or download the installer from the downloads page."));
       return;
@@ -368,11 +477,24 @@ class UpdatesDialog : public QDialog {
       result->setText(QStringLiteral("Could not write %1.").arg(QDir::toNativeSeparators(partial).toHtmlEscaped()));
       return false;
     }
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("version"), info.version);
-    query.addQueryItem(QStringLiteral("kind"), QStringLiteral("installer"));
     QNetworkAccessManager manager;
-    QNetworkRequest request = requestFor(s, s.downloadPath, query);
+    QNetworkRequest request;
+    if (!info.installerUrl.isEmpty()) {
+      // GitHub: the asset's own address, which redirects to GitHub's file storage. No login.
+      if (!safeDownloadUrl(info.installerUrl)) {
+        result->setText(QStringLiteral("Updates are only installed over https."));
+        return false;
+      }
+      request = QNetworkRequest(QUrl(info.installerUrl));
+      request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DaedalCAD/%1").arg(currentAppVersion()));
+      request.setRawHeader("Accept", "application/octet-stream");
+      request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    } else {
+      QUrlQuery query;
+      query.addQueryItem(QStringLiteral("version"), info.version);
+      query.addQueryItem(QStringLiteral("kind"), QStringLiteral("installer"));
+      request = requestFor(s, s.downloadPath, query);
+    }
     request.setTransferTimeout(60000);
     QNetworkReply* reply = manager.get(request);
     downloading = true;
@@ -413,7 +535,11 @@ class UpdatesDialog : public QDialog {
     if (cancelled) {
       result->setText(QStringLiteral("Download cancelled."));
     } else if (status != 200 || reply->error() != QNetworkReply::NoError) {
-      result->setText(serverError(reply, rest).toHtmlEscaped());
+      const QString why = info.installerUrl.isEmpty()
+                              ? serverError(reply, rest)
+                              : QStringLiteral("The download from GitHub did not work (%1). Try again, or use the release page.")
+                                    .arg(status ? QString::number(status) : reply->errorString());
+      result->setText(why.toHtmlEscaped());
     } else if (sha256Of(partial).compare(info.installerSha256, Qt::CaseInsensitive) != 0) {
       result->setText(QStringLiteral("The download is damaged (its checksum does not match). Try again."));
     } else {
@@ -428,6 +554,8 @@ class UpdatesDialog : public QDialog {
 
   UpdateHooks hooks;
   UpdateInfo info;
+  QFormLayout* form = nullptr;
+  QComboBox* sourceBox = nullptr;
   QLineEdit* hostEdit = nullptr;
   QLineEdit* loginEdit = nullptr;
   QLineEdit* passwordEdit = nullptr;

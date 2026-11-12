@@ -150,6 +150,22 @@ That writes, next to the script, with the version from `CMakeLists.txt`:
 Your own projects, imported files and placed 2D shapes are never included. The top of
 `package.ps1` lists its options.
 
+**Publishing a release on GitHub.** DaedalCAD's update check reads the latest release of the
+repository (it needs no login, so the repository has to be public):
+
+1. Set the new version in `CMakeLists.txt` (`project(DaedalCAD VERSION …)`), commit and push, then
+   run `build-windows.bat step package`.
+2. On GitHub: **Releases** > **Draft a new release** > **Choose a tag**, type `v<version>` (for
+   example `v0.9.8`) and pick **Create new tag on publish**, on `main`.
+3. Write the title and the notes: the notes are what the update window shows.
+4. Drag `DaedalCAD-<version>-setup.exe` and `DaedalCAD-<version>-windows-x64.zip` into the box at
+   the bottom, wait for both, and press **Publish release**.
+
+Installed copies then update themselves. They use the installer only when its name is
+`DaedalCAD-<version>-setup.exe` (or ends in `-setup.exe`) and the tag is the version, with or
+without the `v`. Drafts and pre-releases are not offered. A fork builds with its own repository:
+`-DDAEDALCAD_GITHUB_REPO=owner/name`.
+
 ## 5. When something goes wrong
 
 - **Scripts are blocked** ("running scripts is disabled"): use `build-windows.bat`, or
