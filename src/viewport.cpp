@@ -232,6 +232,15 @@ void axisBasis(const QMatrix4x4& model, const QVector3D& pivot, int axis, QVecto
   *v = QVector3D::crossProduct(*dir, *u).normalized();
 }
 
+// The frame the gizmo's axes follow: the part's own for turning and sizing, but the bed's for
+// moving, so the move arrows always point along X, Y and Z however the part is turned.
+QMatrix4x4 gizmoFrame(const QMatrix4x4& model, int tool) {
+  if (tool != 0) return model;
+  QMatrix4x4 frame;
+  frame.translate(model(0, 3), model(1, 3), model(2, 3));
+  return frame;
+}
+
 void addRod(std::vector<float>& out, const QVector3D& from, const QVector3D& to, float radius) {
   const QVector3D axis = to - from;
   const float len = axis.length();
@@ -1522,7 +1531,7 @@ int Viewport::gizmoAxis(const QPointF& pos) const {
     QVector3D dir;
     QVector3D u;
     QVector3D v;
-    axisBasis(item->model, pivot, axisIndex, &dir, &u, &v);
+    axisBasis(gizmoFrame(item->model, tool), pivot, axisIndex, &dir, &u, &v);
     if (tool == 1) {
       const float ring = gizmoRingRadius(*item, pivot, u, v, len);
       const float sweep = 5.6f;
@@ -2423,7 +2432,7 @@ void Viewport::paintGL() {
       QVector3D dir;
       QVector3D u;
       QVector3D v;
-      axisBasis(gizmo->model, pivot, axisIndex, &dir, &u, &v);
+      axisBasis(gizmoFrame(gizmo->model, tool), pivot, axisIndex, &dir, &u, &v);
       std::vector<float> tris;
       const bool active = axisIndex == hot;
       const float scale = active ? 1.18f : 1.f;
@@ -2464,12 +2473,23 @@ void Viewport::paintGL() {
       const QVector3D faces[6] = {QVector3D(boxLo.x(), mid.y(), mid.z()), QVector3D(boxHi.x(), mid.y(), mid.z()),
                                   QVector3D(mid.x(), boxLo.y(), mid.z()), QVector3D(mid.x(), boxHi.y(), mid.z()),
                                   QVector3D(mid.x(), mid.y(), boxLo.z()), QVector3D(mid.x(), mid.y(), boxHi.z())};
+      // Corner handles white, side handles yellow (darker under the mouse) with a dark edge, so
+      // they stand out on any part colour and on the dark background.
       auto drawHandle = [&](const QVector3D& world, float half, int handle, bool face) {
+        const float size = half * (handle == activeHandle ? 1.35f : 1.f);
         std::vector<float> cube;
-        addCube(cube, world, half * (handle == activeHandle ? 1.35f : 1.f));
+        if (face) {
+          addCube(cube, world, size * 1.3f);
+          glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(cube.size() * sizeof(float)), cube.data(), GL_DYNAMIC_DRAW);
+          glUniform3f(lineColor, 0.10f, 0.10f, 0.11f);
+          glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(cube.size() / 3));
+          cube.clear();
+        }
+        addCube(cube, world, size);
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(cube.size() * sizeof(float)), cube.data(), GL_DYNAMIC_DRAW);
-        if (handle == activeHandle) glUniform3f(lineColor, 0.95f, 0.78f, 0.28f);
-        else if (face) glUniform3f(lineColor, 0.12f, 0.13f, 0.15f);
+        if (face && handle == activeHandle) glUniform3f(lineColor, 0.80f, 0.56f, 0.02f);
+        else if (face) glUniform3f(lineColor, 0.98f, 0.80f, 0.12f);
+        else if (handle == activeHandle) glUniform3f(lineColor, 0.95f, 0.78f, 0.28f);
         else glUniform3f(lineColor, 0.94f, 0.96f, 0.97f);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(cube.size() / 3));
       };
@@ -3024,7 +3044,7 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
     }
   } else if (!scaleDrag) {
     QVector3D local(axis == 0 ? 1.f : 0.f, axis == 1 ? 1.f : 0.f, axis == 2 ? 1.f : 0.f);
-    dragAxis = (item->model.map(local) - dragPivot).normalized();
+    dragAxis = (gizmoFrame(item->model, tool).map(local) - dragPivot).normalized();
   }
   QMatrix4x4 localMatrix = item->parentWorld.inverted() * item->model;
   double pos[3];
@@ -3262,8 +3282,12 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
       }
       return minZ;
     };
+    // Sizing keeps the part standing where it stood: its lowest point stays put. Except when the
+    // handle grabbed is a side handle on the part's underside (the bottom one, for a part that is
+    // not turned): then the bottom is what moves, and the top stays.
     const double oldBottom = lowestZ(startPos, startRot, startScale);
-    pos[2] += oldBottom - lowestZ(pos, rot, scale);
+    const bool fromBelow = scaleHandle >= 8 && startAt.z() <= oldBottom + 1e-3;
+    if (!fromBelow) pos[2] += oldBottom - lowestZ(pos, rot, scale);
     if (liveScaleDimensions) {
       liveDimensions[0] = scaleBaseExtents[0] * std::abs(scale[0]);
       liveDimensions[1] = scaleBaseExtents[1] * std::abs(scale[1]);
