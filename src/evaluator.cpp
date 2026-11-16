@@ -6023,33 +6023,42 @@ Manifold filletPrismContours(Manifold solid, double edgeR, double surfaceR, int 
   }
 }
 
-// The plate's height in this group's own frame, or NaN when the group (or one it sits in) is
-// tilted or repeated, so the plate is no longer one level plane there.
-double plateInGroup(const Document& doc, const Node& group) {
-  std::vector<const Node*> chain;
-  for (const Node* c = &group; c; c = c->parentId.isEmpty() ? nullptr : doc.find(c->parentId)) chain.push_back(c);
-  double z = doc.workplaneZ;
-  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-    const Node* n = *it;
-    if (n->kind == Node::Kind::Pattern || std::abs(n->rot[0]) > 1e-9 || std::abs(n->rot[1]) > 1e-9 ||
-        std::abs(n->scale[2]) < 1e-9)
-      return std::numeric_limits<double>::quiet_NaN();
-    z = (z - n->pos[2]) / n->scale[2];
-  }
-  return z;
+// Parts meant to stand on the same level end up a hair above or below it after a resize or a
+// rounded move. A hole whose bottom stops 0.00005 mm above a solid's bottom leaves a paper-thin floor
+// in the cut; a solid 0.00005 mm up does not merge with its neighbour. So before a group's parts are
+// combined, anything within 0.001 mm of the bottom of one of its solid parts is put exactly on it.
+// Those levels come from the parts themselves, not from where the plate is, so a group keeps the
+// same shape wherever it is moved (and its cached solid stays good when it is lifted or lowered).
+constexpr double kSettle = 1e-3;
+
+// The levels: the bottoms of the solid parts, bottoms within 0.001 mm of each other counted as one
+// (the lowest of them).
+std::vector<double> groupFloors(const std::vector<Parts>& kids) {
+  std::vector<double> bottoms;
+  for (const Parts& kid : kids)
+    if (kid.hasSolid && !kid.solid.IsEmpty()) bottoms.push_back(kid.solid.BoundingBox().min.z);
+  std::sort(bottoms.begin(), bottoms.end());
+  std::vector<double> floors;
+  for (double z : bottoms)
+    if (floors.empty() || z > floors.back() + kSettle) floors.push_back(z);
+  return floors;
 }
 
-// Parts meant to stand on the plate end up a hair above or below it after a resize or a rounded
-// move. A hole whose bottom stops 0.00005 mm above a solid's bottom leaves a paper-thin floor in
-// the cut; a solid 0.00005 mm up does not merge with its neighbour. Anything within 0.001 mm of
-// the plate is put exactly on it before the parts are combined.
-void settleOnPlate(Parts& parts, double plate) {
-  if (std::isnan(plate)) return;
-  auto settle = [plate](const Manifold& m) {
+void settleOnFloors(Parts& parts, const std::vector<double>& floors) {
+  if (floors.empty()) return;
+  auto settle = [&floors](const Manifold& m) {
     const manifold::Box box = m.BoundingBox();
-    if (box.min.z > plate + 1e-3 || box.max.z < plate - 1e-3) return m;  // nowhere near it
-    return m.Warp([plate](vec3& p) {
-      if (std::abs(p.z - plate) < 1e-3) p.z = plate;
+    std::vector<double> near;
+    for (double f : floors)
+      if (box.min.z <= f + kSettle && box.max.z >= f - kSettle) near.push_back(f);
+    // Nothing near a level, or the part's own bottom is the level: nothing to line up.
+    if (near.empty() || (near.size() == 1 && box.min.z == near.front())) return m;
+    return m.Warp([near](vec3& p) {
+      for (double f : near)
+        if (std::abs(p.z - f) < kSettle) {
+          p.z = f;
+          return;
+        }
     });
   };
   if (parts.hasSolid) parts.solid = settle(parts.solid);
@@ -6057,8 +6066,7 @@ void settleOnPlate(Parts& parts, double plate) {
 }
 
 // Everything a group's merged solid depends on: its whole subtree (shapes, settings, the placement
-// of everything under it, not its own) and where the plate is. Two groups with the same key have
-// the same solid.
+// of everything under it, not its own). Two groups with the same key have the same solid.
 std::string groupKey(const Document& doc, const Node& group) {
   auto n = [](double v) { return QString::number(v, 'g', 6); };
   QStringList parts{QStringLiteral("grp"), QString::number(doc.filletSegments)};
@@ -6117,7 +6125,6 @@ std::string groupKey(const Document& doc, const Node& group) {
     for (const Node* child : doc.children(cur.id)) walk(*child, true);
   };
   walk(group, false);
-  parts << QStringLiteral("plate") << QString::number(plateInGroup(doc, group), 'g', 12);
   return parts.join(QLatin1Char('|')).toStdString();
 }
 
@@ -6231,11 +6238,7 @@ Parts evalGroup(const Document& doc, const Node& node, bool applyOwn, QString* w
   const std::vector<const Node*> children = doc.children(node.id);
   std::vector<Parts> kids(children.size());
   std::vector<QString> notes(children.size());
-  const double plate = plateInGroup(doc, node);
-  auto build = [&](size_t i) {
-    kids[i] = evalNode(doc, *children[i], true, &notes[i]);
-    settleOnPlate(kids[i], plate);
-  };
+  auto build = [&](size_t i) { kids[i] = evalNode(doc, *children[i], true, &notes[i]); };
   const bool sideBySide = children.size() > 1 && !hasText(doc, node);
   std::vector<std::future<void>> pending;
   for (size_t i = 0; i < children.size(); ++i) {
@@ -6260,6 +6263,8 @@ Parts evalGroup(const Document& doc, const Node& node, bool applyOwn, QString* w
   }
   if (failure) std::rethrow_exception(failure);
   for (const QString& text : notes) note(warning, text);
+  const std::vector<double> floors = groupFloors(kids);
+  for (Parts& kid : kids) settleOnFloors(kid, floors);
   parts = node.hull              ? hullOf(std::move(kids), node.hullMode == 1, warning)
           : node.intersect       ? intersectionOf(std::move(kids), warning)
           : node.blend > 0.01    ? blendOf(std::move(kids), node.blend, warning)
@@ -6504,8 +6509,13 @@ std::vector<ColourPiece> colourPieces(const Document& doc, const Node& group, QS
       }
     byColour.push_back({color, {std::move(solid)}});
   };
-  const double plate = plateInGroup(doc, group);
+  // The same levels as the merged solid lines its parts up to, so the colours fit it exactly.
+  std::vector<Parts> kids;
+  for (const Node* child : doc.children(group.id)) kids.push_back(evalNode(doc, *child, true, warning));
+  const std::vector<double> floors = groupFloors(kids);
+  size_t index = 0;
   for (const Node* child : doc.children(group.id)) {
+    Parts& part = kids[index++];
     if (child->hole) continue;
     if (child->kind == Node::Kind::Group && child->multiColor && !child->hole) {
       for (const ColourPiece& inner : colourPieces(doc, *child, warning)) {
@@ -6513,13 +6523,12 @@ std::vector<ColourPiece> colourPieces(const Document& doc, const Node& group, QS
         placed.solid = inner.solid;
         placed.hasSolid = true;
         placed = transformed(std::move(placed), child->pos, child->rot, kZero, child->scale);
-        settleOnPlate(placed, plate);
+        settleOnFloors(placed, floors);
         add(inner.color, placed.solid);
       }
       continue;
     }
-    Parts part = evalNode(doc, *child, true, warning);
-    settleOnPlate(part, plate);
+    settleOnFloors(part, floors);
     if (part.hasSolid) add(child->color, part.solid);
   }
   if (byColour.size() <= 1) {
@@ -6733,6 +6742,11 @@ void drawWalk(const Document& doc, const Node& node, const QMatrix4x4& parentWor
 }
 
 }  // namespace
+
+std::string groupCacheKey(const Document& doc, const QString& groupId) {
+  const Node* group = doc.find(groupId);
+  return group ? groupKey(doc, *group) : std::string();
+}
 
 bool svgPivotOffset(const QString& path, double* x, double* y) {
   if (x) *x = 0;

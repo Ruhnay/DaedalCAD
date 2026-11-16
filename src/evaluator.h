@@ -8,6 +8,7 @@
 #include <QColor>
 #include <QMatrix4x4>
 #include <QString>
+#include <string>
 #include <QStringList>
 #include <QVector3D>
 
@@ -156,6 +157,9 @@ struct ExportObject {
 };
 
 CpuMesh evaluateSolid(const Document& doc, const QStringList& only, QString* error);
+// What a group's cached solid is stored under: two groups with the same key have the same solid.
+// It leaves out the group's own placement, so moving a group never rebuilds it.
+std::string groupCacheKey(const Document& doc, const QString& groupId);
 // One finished part per object: a part on the bed, or a group after its own holes are cut.
 // A hole left on the bed is not an object; it only cuts when evaluateSolid merges the plate.
 std::vector<ExportObject> evaluateObjects(const Document& doc, const QStringList& only, QString* error);
