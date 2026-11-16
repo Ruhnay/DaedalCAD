@@ -20,7 +20,7 @@ what is technically complete.
 - **Do not mention other CAD applications, aside from TinkerCAD**, anywhere: code, comments, docs,
   commit messages.
 - **Branches:** `main` is pinned at the last finished state; do not commit to it. Work happens on
-  the `0.9.8` branch, until the owner says otherwise.
+  the `0.9.9` branch, until the owner says otherwise.
 - **Commits** go to that branch in small, focused steps, each with a clear message saying what
   changed and why. Sign them if your setup can (the owner wants them shown as Verified on GitHub).
   No attribution or session-link lines (such as Co-Authored-By): the author already shows who made it.
