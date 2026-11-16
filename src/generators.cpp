@@ -509,6 +509,25 @@ std::vector<Spec> makeSpecs() {
                        "plate", "What the ball's stem ends in."),
                 choice("socketBase", "Socket end", {{"plate", "Plate with screw holes"}, {"foot", "Round foot"}, {"camera", "1/4\"-20 camera thread"}, {"none", "Plain stem"}},
                        "camera", "What the socket's stem ends in."),
+                choice("socketShape", "Socket", {{"auto", "Automatic, from the ball size"}, {"custom", "Set my own"}}, "auto",
+                       "Automatic sizes the walls and slots from the ball. Set my own to make the socket stronger or "
+                       "easier to snap in."),
+                when(number("socketWall", "Socket wall", 3, 1, 20, 0.2, 1, " mm",
+                            "How thick the socket's wall is around the ball. Thicker fingers are stronger and grip "
+                            "harder, but need more force to snap in."),
+                     "socketShape=custom"),
+                when(integer("slots", "Slots", 4, 2, 12,
+                             "How many cuts split the rim into fingers. More slots open more easily; fewer make "
+                             "each finger wider and stronger."),
+                     "socketShape=custom"),
+                when(number("slotLength", "Slot length", 6, 1, 60, 0.5, 1, " mm",
+                            "How far the cuts reach down from the rim. Longer slots open more easily but leave "
+                            "longer, weaker fingers."),
+                     "socketShape=custom"),
+                when(number("grip", "Lip over the ball", 55, 20, 85, 1, 0, " %",
+                            "How far the socket closes over the ball, measured up from the ball's middle as a share "
+                            "of its radius. More holds the ball tighter but is harder to snap in."),
+                     "socketShape=custom"),
                 choice("layout", "Layout", {{"print", "Print: side by side"}, {"assembled", "Assembled"}}, "print")};
     all.push_back(s);
   }
@@ -2577,7 +2596,8 @@ std::vector<Piece> buildBallJoint(const Values& v, QString* warning) {
   const double R = v.num("ball") * 0.5;
   const double c = v.num("clearance");
   double stemR = v.num("stem") * 0.5;
-  const double socketTop = 0.55 * R;  // above the ball's center: holds it in
+  const bool custom = v.pick("socketShape") == QLatin1String("custom");
+  const double socketTop = (custom ? v.num("grip") / 100.0 : 0.55) * R;  // above the ball's center: holds it in
   const double opening = std::sqrt(std::max(0.0, (R + c) * (R + c) - socketTop * socketTop));
   if (stemR > opening - 0.8) {
     stemR = std::max(1.0, opening - 0.8);
@@ -2599,7 +2619,7 @@ std::vector<Piece> buildBallJoint(const Values& v, QString* warning) {
   // Socket part: base, stem, a cup around the ball with four slots so it springs open.
   double socketBase = 0;
   Manifold socket = jointBase(v.pick("socketBase"), stemR, c, &socketBase);
-  const double wall = std::max(2.0, R * 0.25);
+  const double wall = custom ? v.num("socketWall") : std::max(2.0, R * 0.25);
   const double cupR = R + c + wall;
   const double sc = socketBase + stemL + cupR;  // the socket's center
   const double cupBottom = sc - R - c - 1.6;
@@ -2610,9 +2630,21 @@ std::vector<Piece> buildBallJoint(const Values& v, QString* warning) {
   cup = cup - Manifold::Sphere(R + c, segs).Translate(vec3(0, 0, sc));
   // Lead-in so the ball starts the opening.
   cup = cup - coneZ(opening - 0.2, opening + 1.2, sc + socketTop - 1.4, sc + socketTop + 0.01);
-  const double slotDown = sc - 0.15 * R;
-  cup = cup - block(-cupR - 1, cupR + 1, -0.6, 0.6, slotDown, sc + socketTop + 1) -
-        block(-0.6, 0.6, -cupR - 1, cupR + 1, slotDown, sc + socketTop + 1);
+  const double rim = sc + socketTop;
+  if (custom) {
+    // Slots from the rim down, evenly around; never through the floor of the cup.
+    double slotDown = rim - v.num("slotLength");
+    if (slotDown < cupBottom + 1.0) {
+      slotDown = cupBottom + 1.0;
+      note(warning, QStringLiteral("Slots shortened so they stop above the bottom of the socket."));
+    }
+    const int slotCount = std::max(2, v.whole("slots"));  // not called "slots": Qt reserves that word
+    for (int i = 0; i < slotCount; ++i)
+      cup = cup - block(0, cupR + 1, -0.6, 0.6, slotDown, rim + 1).Rotate(0, 0, 360.0 * i / slotCount);
+  } else {
+    const double slotDown = sc - 0.15 * R;
+    cup = cup - block(-cupR - 1, cupR + 1, -0.6, 0.6, slotDown, rim + 1) - block(-0.6, 0.6, -cupR - 1, cupR + 1, slotDown, rim + 1);
+  }
   socket = socket.IsEmpty() ? sStem + cup : socket + sStem + cup;
 
   std::vector<Piece> pieces{{QStringLiteral("Ball"), ballPart}, {QStringLiteral("Socket"), socket}};

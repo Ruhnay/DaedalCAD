@@ -281,6 +281,26 @@ int main() {
     }
   }
 
+  // Ball joint with its own socket settings: the wall, the number of slots (fingers), how far
+  // they reach down, and the lip over the ball all follow the values.
+  for (int slotCount : {3, 6}) {
+    const std::string label = "ball joint, own socket, " + std::to_string(slotCount) + " slots";
+    const auto pieces = make("balljoint", QJsonObject{{"layout", "assembled"}, {"socketBase", "none"}, {"ballBase", "none"}, {"usePrinter", false},
+                                                      {"clearance", 0.15}, {"socketShape", "custom"}, {"socketWall", 4.0},
+                                                      {"slots", slotCount}, {"slotLength", 7.0}, {"grip", 65.0}},
+                             label);
+    if (pieces.size() != 2) continue;
+    apart(pieces, label, 0.14);
+    check((pieces[0].solid.Translate({0, 0, 2.0}) ^ pieces[1].solid).Volume() > 0.5, label + ": the ball is held in");
+    const auto box = pieces[1].solid.BoundingBox();
+    check(std::abs((box.max.x - box.min.x) - 2 * (8 + 0.15 + 4)) < 0.05, label + ": the wall is 4 mm");
+    // Just under the rim the cup is cut into one finger per slot (one outline each); below the slots
+    // it is a whole ring again (an outline outside and one inside).
+    const double rim = box.max.z;
+    check(static_cast<int>(pieces[1].solid.Slice(rim - 1.0).size()) == slotCount, label + ": one finger per slot");
+    check(pieces[1].solid.Slice(rim - 7.6).size() == 2, label + ": the slots stop 7 mm down");
+  }
+
   // Hose adapter: the bore is open end to end, a sleeve takes its pipe, and the wall holds.
   {
     struct Case { const char* a; double da; const char* b; double db; };
