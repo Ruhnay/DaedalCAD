@@ -607,6 +607,36 @@ int main() {
     }
   }
 
+  // --- Swirl -----------------------------------------------------------------------------------
+  {
+    const auto lines = make("swirl", {}, "swirl lines");
+    if (!lines.empty()) {
+      const manifold::Box box = lines[0].solid.BoundingBox();
+      check(box.Size().x <= 50.001 && box.Size().y <= 50.001 && box.Size().x > 35, "swirl: the arms stay inside the diameter");
+      check(std::abs(box.Size().z - 2) < 1e-6, "swirl: as thick as asked");
+      check(lines[0].solid.Decompose().size() == 1, "swirl: arms meeting in the middle are one piece");
+    }
+    for (int arms : {2, 3, 5}) {
+      const auto open = make("swirl", QJsonObject{{"arms", arms}, {"middle", 8}}, "swirl with an open middle");
+      if (!open.empty())
+        check(open[0].solid.Decompose().size() == size_t(arms), "swirl: an open middle leaves the " + std::to_string(arms) + " arms apart");
+    }
+    const double discVolume = 3.14159265 * 25 * 25 * 3;
+    const auto raised = make("swirl", QJsonObject{{"make", "disc"}}, "swirl raised on a disc");
+    const auto groove = make("swirl", QJsonObject{{"make", "disc"}, {"onDisc", "groove"}}, "swirl cut into a disc");
+    if (!raised.empty() && !groove.empty() && !lines.empty()) {
+      const double lineArea = lines[0].solid.Volume() / 2;
+      check(raised[0].solid.Decompose().size() == 1, "swirl disc: lines and disc are one solid");
+      check(std::abs(raised[0].solid.Volume() - (discVolume + lineArea)) < discVolume * 0.01, "swirl disc: raised by the line height");
+      check(std::abs(groove[0].solid.Volume() - (discVolume - lineArea)) < discVolume * 0.01, "swirl disc: grooves as deep as asked");
+    }
+    QString warning;
+    const auto deep = gen::build("swirl", QJsonObject{{"make", "disc"}, {"onDisc", "groove"}, {"relief", 10}}, &warning);
+    check(deep.size() == 1 && deep[0].solid.Decompose().size() == 1 && warning.contains("shallower"),
+          "swirl disc: grooves never cut through the disc");
+    check(gen::makesHole("swirl", QJsonObject{{"make", "holes"}}) && !gen::makesHole("swirl", {}), "swirl: as a hole is a hole shape");
+  }
+
   // --- Threads on any cylinder ------------------------------------------------------------------
   for (const auto& size : gen::threadSizes()) {
     if (size.diameter > 12) continue;

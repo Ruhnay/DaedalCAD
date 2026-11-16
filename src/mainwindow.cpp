@@ -944,6 +944,20 @@ QIcon shapeIcon(const QString& key) {
         star << QPointF(21.5 + r * std::cos(a), 21.8 + r * std::sin(a));
       }
       painter.drawPolygon(star);
+    } else if (g == "swirl") {
+      painter.drawEllipse(QPointF(16, 16), 12.5, 12.5);
+      painter.setBrush(Qt::NoBrush);
+      painter.setPen(QPen(dark, 2.6, Qt::SolidLine, Qt::RoundCap));
+      for (int arm = 0; arm < 2; ++arm) {
+        QPainterPath path;
+        for (int i = 0; i <= 24; ++i) {
+          const double t = i / 24.0, r = 11.5 * t, a = 3.14159265 * arm - 4.7 * t;
+          const QPointF at(16 + r * std::cos(a), 16 + r * std::sin(a));
+          if (i == 0) path.moveTo(at);
+          else path.lineTo(at);
+        }
+        painter.drawPath(path);
+      }
     } else if (g == "patterntube") {
       QPolygonF pot;
       pot << QPointF(8, 28) << QPointF(5, 4) << QPointF(27, 4) << QPointF(24, 28);
@@ -5538,7 +5552,8 @@ void MainWindow::showHelp() {
        "holes all the way round a straight or tapered tube: a vase, a pot, a lamp shade). Both can make <b>holes only</b>: just the "
        "holes, as a hole shape, to group with a part and cut the pattern into it (the tube's holes wrap round a round part sized "
        "like it). <b>Workshop</b> has bit "
-       "and tool holders, drawer dividers, cable clips, grommets and labels, and name tags. <b>Testing and calibration</b> has the "
+       "and tool holders, drawer dividers, cable clips, grommets and labels, name tags, and swirls (arms winding out from "
+       "the middle: as lines, on a disc, or as a hole to cut into a part). <b>Testing and calibration</b> has the "
        "fit test, a hole size test, a thread fit test and an overhang and bridge test. Drag one onto the bed or click it.<br><br>"
        "Select a placed generator with the Move tool and its settings show in the tool window; the part rebuilds when you change one "
        "and keeps standing where it was. <b>Clearance</b> is the gap between parts that go together. 0.2 mm suits most printers; "

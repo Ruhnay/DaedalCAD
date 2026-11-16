@@ -948,6 +948,38 @@ std::vector<Spec> makeSpecs() {
     all.push_back(s);
   }
   {
+    Spec s{QStringLiteral("swirl"), QStringLiteral("Swirl"), workshop,
+           QStringLiteral("Arms that wind out from the middle to the edge: as lines on their own, on a disc (raised or "
+                          "cut in), or as a hole to cut the swirl into another part."),
+           {}};
+    s.params = {choice("make", "Make",
+                       {{"lines", "The swirl lines"}, {"disc", "A disc with the swirl"}, {"holes", "Swirl as a hole, to cut into a part"}},
+                       "lines",
+                       "As a hole: group it with a part to cut the swirl into that part; the thickness is how deep it cuts."),
+                number("diameter", "Diameter", 50, 5, 400, 1, 1, " mm", "Where the arms end: they run out at this circle."),
+                when(number("height", "Thickness", 2, 0.2, 50, 0.2), "make=lines|holes"),
+                when(number("disc", "Disc thickness", 3, 0.6, 50, 0.2), "make=disc"),
+                when(choice("onDisc", "Lines", {{"raised", "Raised on the disc"}, {"groove", "Cut into the disc"}}, "raised"),
+                     "make=disc"),
+                when(number("relief", "Line height", 1, 0.2, 20, 0.2, 1, " mm",
+                            "Raised: how far the lines stand up from the disc. Cut in: how deep the grooves go."),
+                     "make=disc"),
+                heading(QStringLiteral("Swirl")),
+                integer("arms", "Arms", 2, 1, 12, "How many arms wind out from the middle. 2 makes an S, 3 a three-armed swirl."),
+                number("turns", "Turns", 0.75, 0.1, 5, 0.05, 2, "", "How far each arm winds round on its way out: 1 is a full turn."),
+                number("curl", "Curl in the middle", 1, 0.4, 3, 0.1, 1, "",
+                       "Above 1 the arms wind tighter near the middle and open up toward the edge; below 1 the other way round."),
+                choice("direction", "Winds", {{"cw", "Clockwise"}, {"ccw", "Counter-clockwise"}}, "cw",
+                       "Which way the arms turn on their way out, seen from above."),
+                number("lineWidth", "Line width", 3, 0.4, 40, 0.1, 1),
+                number("tipWidth", "Width at the tips", 40, 0, 100, 5, 0, QStringLiteral(" %"),
+                       "How wide the arms still are where they reach the edge, as a part of the line width. Lower makes "
+                       "pointier tips."),
+                number("middle", "Open middle", 0, 0, 200, 0.5, 1, " mm",
+                       "0: the arms meet in the middle. More leaves a round opening of that diameter where they start.")};
+    all.push_back(s);
+  }
+  {
     Spec s{QStringLiteral("fittest"), QStringLiteral("Fit test"), calibration,
            QStringLiteral("A strip of holes with growing clearance and one peg. Print it, find the tightest hole the "
                           "peg slides into, and use that clearance in the other generators. Hole 1 has one dot, hole "
@@ -4083,6 +4115,82 @@ std::vector<Piece> buildLithophane(const Values& v, QString* warning) {
   return {{litho ? QStringLiteral("Lithophane") : QStringLiteral("Photo relief"), part}};
 }
 
+// ---------------------------------------------------------------------------------------------
+// Swirl: arms winding out from the middle to a circle
+
+CrossSection swirlLines(const Values& v) {
+  const double R = v.num("diameter") * 0.5;
+  const int arms = std::max(1, v.whole("arms"));
+  const double sweep = v.num("turns") * 2 * kPi;
+  const double width = v.num("lineWidth");
+  const double tip = width * v.num("tipWidth") / 100.0;
+  const double open = std::min(v.num("middle") * 0.5, R * 0.95);
+  const double curl = v.num("curl");
+  const double dir = v.pick("direction") == QLatin1String("ccw") ? 1.0 : -1.0;
+  // A point about every 0.4 mm along an arm (the arm is at most the sweep at the rim plus the climb).
+  const int steps = std::clamp(static_cast<int>(std::ceil((sweep * R + (R - open)) / 0.4)), 24, 4000);
+  std::vector<CrossSection> pieces;
+  pieces.reserve(static_cast<size_t>(arms) * steps);
+  auto dot = [](vec2 at, double r, SimplePolygon& out) {
+    const int segs = std::clamp(static_cast<int>(std::ceil(2 * kPi * r / 0.3)), 12, 48);
+    for (int i = 0; i < segs; ++i) {
+      const double a = 2 * kPi * i / segs;
+      out.push_back(at + vec2(r * std::cos(a), r * std::sin(a)));
+    }
+  };
+  for (int arm = 0; arm < arms; ++arm) {
+    const double start = 2 * kPi * arm / arms;
+    vec2 last(0, 0);
+    double lastR = 0;
+    for (int i = 0; i <= steps; ++i) {
+      const double t = static_cast<double>(i) / steps;
+      const double r = open + (R - open) * std::pow(t, curl);
+      const double a = start + dir * sweep * t;
+      const vec2 at(r * std::cos(a), r * std::sin(a));
+      // Full width in the middle, narrowing to the tip width at the rim; never thinner than a nozzle line.
+      const double half = std::max(0.2, width + (tip - width) * t) * 0.5;
+      if (i > 0) {
+        // Each step is the hull of two round dots: a smooth line with round ends that may change width.
+        SimplePolygon pts;
+        dot(last, lastR, pts);
+        dot(at, half, pts);
+        pieces.push_back(CrossSection::Hull(pts));
+      }
+      last = at;
+      lastR = half;
+    }
+  }
+  const CrossSection lines = CrossSection::BatchBoolean(pieces, OpType::Add);
+  // The arms stop at the rim, the round ends cut off along the circle.
+  return lines ^ CrossSection(circle(R, circleSegments(R)));
+}
+
+std::vector<Piece> buildSwirl(const Values& v, QString* warning) {
+  const double R = v.num("diameter") * 0.5;
+  if (v.num("middle") * 0.5 > R * 0.95) note(warning, QStringLiteral("The open middle is as big as the swirl; it was made smaller."));
+  const CrossSection lines = swirlLines(v);
+  if (lines.IsEmpty()) {
+    note(warning, QStringLiteral("The swirl came out empty; make the lines wider."));
+    return {};
+  }
+  const QString make = v.pick("make");
+  if (make == QLatin1String("holes")) return {{QStringLiteral("Swirl hole"), prism(lines, 0, v.num("height"))}};
+  if (make != QLatin1String("disc")) return {{QStringLiteral("Swirl"), prism(lines, 0, v.num("height"))}};
+  const double t = v.num("disc");
+  const Manifold disc = prism(CrossSection(circle(R, circleSegments(R))), 0, t);
+  if (v.pick("onDisc") == QLatin1String("groove")) {
+    double depth = v.num("relief");
+    if (depth > t - 0.4) {
+      depth = t - 0.4;
+      note(warning, QStringLiteral("The grooves were made shallower so they do not cut through the disc."));
+    }
+    return {{QStringLiteral("Swirl disc"), disc - prism(lines, t - depth, t + 1)}};
+  }
+  // Raised: the lines start inside the disc, so the two are one solid.
+  return {{QStringLiteral("Swirl disc"), disc + prism(lines, t * 0.5, t + v.num("relief"))}};
+}
+
+
 QString pictureValue(const QString& path, int longest) {
   QImage image(path);
   if (image.isNull()) return {};
@@ -5043,6 +5151,7 @@ std::vector<Piece> build(const QString& id, const QJsonObject& values, QString* 
     else if (id == QLatin1String("cable")) pieces = buildCable(v, warning);
     else if (id == QLatin1String("nametag")) pieces = buildNameTag(v, warning);
     else if (id == QLatin1String("lithophane")) pieces = buildLithophane(v, warning);
+    else if (id == QLatin1String("swirl")) pieces = buildSwirl(v, warning);
     else if (id == QLatin1String("dice")) pieces = buildDice(v, warning);
     else if (id == QLatin1String("holetest")) pieces = buildHoleTest(v, warning);
     else if (id == QLatin1String("threadtest")) pieces = buildThreadTest(v, warning);
@@ -5087,7 +5196,8 @@ bool frameCentre(const QString& id, const QJsonObject& values, double printerCle
 
 bool makesHole(const QString& id, const QJsonObject& values) {
   const QString make = values.value(QStringLiteral("make")).toString();
-  if (id == QLatin1String("honeycomb") || id == QLatin1String("patterntube")) return make == QLatin1String("holes");
+  if (id == QLatin1String("honeycomb") || id == QLatin1String("patterntube") || id == QLatin1String("swirl"))
+    return make == QLatin1String("holes");
   return id.startsWith(QLatin1String("std")) && make == QLatin1String("hole");
 }
 
