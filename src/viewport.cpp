@@ -2206,7 +2206,9 @@ QStringList Viewport::marqueeIds(const QRectF& rect, bool crossing) const {
       QVector3D(0, 0, 1), QVector3D(1, 0, 1), QVector3D(0, 1, 1), QVector3D(1, 1, 1)};
 
   for (const DrawItem& item : items) {
-    if (item.gizmo || meshOf(item.mesh).triangles <= 0 || item.copyIndex != 0 || item.id.isEmpty() || seen.contains(item.id)) continue;
+    // The selected part counts too (it is the one drawn with the handles), so a box around it and
+    // its neighbours selects them all.
+    if (meshOf(item.mesh).triangles <= 0 || item.copyIndex != 0 || item.id.isEmpty() || seen.contains(item.id)) continue;
     QVector3D lo;
     QVector3D hi;
     if (!meshBox(meshOf(item.mesh), &lo, &hi)) continue;
@@ -2440,7 +2442,8 @@ void Viewport::paintGL() {
       if (tool == 1) {
         // While turning, the disk shows the angle; the ring being turned stays, the others wait.
         if (dragging && !scaleDrag && !active) continue;
-        addRing(tris, pivot, u, v, gizmoRingRadius(*gizmo, pivot, u, v, len) * scale, len * (active ? 0.03f : 0.02f), true);
+        // Under the mouse the ring only gets lighter (below); it keeps its size.
+        addRing(tris, pivot, u, v, gizmoRingRadius(*gizmo, pivot, u, v, len), len * 0.02f, true);
       } else {
         const QVector3D start = pivot + dir * gizmoArrowStart(*gizmo, pivot, dir, len);
         addArrow(tris, start, start + dir * len * scale);
@@ -2451,9 +2454,10 @@ void Viewport::paintGL() {
       float g = colors[axisIndex][1];
       float b = colors[axisIndex][2];
       if (active) {
-        r = std::min(1.f, r + 0.35f);
-        g = std::min(1.f, g + 0.35f);
-        b = std::min(1.f, b + 0.35f);
+        const float lift = tool == 1 ? 0.25f : 0.35f;
+        r = std::min(1.f, r + lift);
+        g = std::min(1.f, g + lift);
+        b = std::min(1.f, b + lift);
       } else if (dragging) {
         r *= 0.35f;
         g *= 0.35f;
