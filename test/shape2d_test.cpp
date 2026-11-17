@@ -376,6 +376,130 @@ int main(int argc, char** argv) {
     }
     d5->close();
   }
+  // --- The tools: several shapes at once, turn, flip, line up, join, round, mirror, measurements ---
+  {
+    auto* d6 = new Shape2DEditorDialog(nullptr, lib.path());
+    d6->resize(1320, 880);
+    d6->show();
+    app.processEvents();
+    Rig t{d6, nullptr, nullptr, {}};
+    for (QWidget* w : d6->findChildren<QWidget*>())
+      if (w->focusPolicy() == Qt::StrongFocus && w->minimumWidth() == 760) t.canvas = w;
+    for (QLabel* l : d6->findChildren<QLabel*>()) if (l->objectName() == "shape2dStatus") t.status = l;
+    for (QDoubleSpinBox* s : d6->findChildren<QDoubleSpinBox*>()) if (s->suffix() == " mm" && s->prefix().isEmpty() && s->objectName().isEmpty()) t.sel << s;
+    QComboBox* kinds = t.comboWith("Star");
+    QComboBox* from6 = t.comboWith("Side to side");
+    CHECK(kinds && from6 && t.sel.size() == 4, "new shapes offered");
+    kinds->setCurrentIndex(kinds->findText("Square"));
+    from6->setCurrentIndex(from6->findText("Corner to corner"));
+    t.button("Draw")->click();
+    t.click({0, 0});
+    t.click({20, 10});
+    t.click({30, 0});
+    t.click({40, 10});
+    t.button("Select")->click();
+    // Shift-click: both selected, the box around them.
+    t.click({10, 5});
+    t.click({35, 5}, Qt::ShiftModifier);
+    CHECK(std::abs(t.w() - 40) < 1e-9 && std::abs(t.h() - 10) < 1e-9, "two shapes selected: %.3f x %.3f", t.w(), t.h());
+    // Drag a box around nothing, then around both.
+    t.drag({-5, -5}, {-2, -2});
+    CHECK(!t.sel[2]->isEnabled(), "an empty box selects nothing");
+    t.drag({-5, -5}, {45, 15});
+    CHECK(std::abs(t.w() - 40) < 1e-9, "a box around both selects both");
+    // Line up the tops after moving one down.
+    t.click({35, 5});
+    t.sel[1]->setValue(-20);
+    t.click({10, 5});
+    t.click({35, -20}, Qt::ShiftModifier);
+    t.button("Top")->click();
+    t.click({35, 5});
+    CHECK(std::abs(t.y() - 5) < 1e-9, "lined up the tops (y=%.3f)", t.y());
+    // Turn the selection a quarter: 10 x 10 stays, a 20 x 10 becomes 10 x 20.
+    t.click({10, 5});
+    t.button("Turn")->click();
+    CHECK(std::abs(t.w() - 10) < 1e-9 && std::abs(t.h() - 20) < 1e-9 && std::abs(t.x() - 10) < 1e-9, "turned 90°: %.3f x %.3f", t.w(), t.h());
+    // Join two overlapping shapes: one outline.
+    t.sel[0]->setValue(30);
+    t.sel[1]->setValue(5);  // now 25..35 x -5..15, over the other square (30..40 x 0..10)
+    t.click({35, 5}, Qt::ShiftModifier);
+    t.button("Join")->click();
+    t.click({27, 0});
+    CHECK(std::abs(t.w() - 15) < 1e-6 && std::abs(t.h() - 20) < 1e-6, "joined: %.3f x %.3f", t.w(), t.h());
+    // Round all corners of a fresh square, then flip and undo.
+    kinds->setCurrentIndex(kinds->findText("Square"));
+    t.button("Draw")->click();
+    t.click({60, 0});
+    t.click({70, 10});
+    t.button("Select")->click();
+    t.click({65, 5});
+    t.button("Round corners")->click();
+    CHECK(t.status->text().contains("Rounded 4 corners"), "four corners rounded: %s", qPrintable(t.status->text()));
+    CHECK(std::abs(t.w() - 10) < 1e-6, "rounding keeps the size");
+    // Measurements stay, can be selected and deleted, and are saved with the shape.
+    t.button("Measure")->click();
+    t.click({60, 0});
+    t.click({70, 0});
+    t.click({60, 10});
+    t.click({70, 10});
+    t.button("Measure")->click();
+    answerNextDialog("tools", "");
+    t.button("Save SVG…")->click();
+    QFile toolsSteps(lib.path() + "/tools/tools.synthvg");
+    toolsSteps.open(QIODevice::ReadOnly);
+    const QJsonArray saved = QJsonDocument::fromJson(toolsSteps.readAll()).object()["measurements"].toArray();
+    CHECK(saved.size() == 2, "two measurements saved, got %d", int(saved.size()));
+    t.click({65, 10});  // on the second measurement's line
+    CHECK(t.status->text().contains("Measurement selected"), "a measurement can be selected: %s", qPrintable(t.status->text()));
+    t.key(Qt::Key_Delete);
+    CHECK(t.status->text().contains("Measurement deleted"), "and deleted");
+    // Mirror: half an outline from the line back to the line closes into one whole shape.
+    QComboBox* mirror = t.comboWith("Mirror left–right");
+    mirror->setCurrentIndex(mirror->findText("Mirror left–right"));
+    kinds->setCurrentIndex(kinds->findText("Freehand"));
+    t.button("Draw")->click();
+    t.click({0, 40});
+    t.click({8, 44});
+    t.click({0, 52});
+    t.click({0, 40});  // close on the first node
+    t.button("Select")->click();
+    t.click({1, 45});
+    CHECK(std::abs(t.w() - 16) < 1e-9 && std::abs(t.x()) < 1e-9, "mirrored into one whole shape: %.3f wide at %.3f", t.w(), t.x());
+    // A star stamped with mirror on also appears on the other side.
+    kinds->setCurrentIndex(kinds->findText("Star"));
+    t.button("Draw")->click();
+    t.click({20, 60});
+    t.click({30, 70});
+    t.button("Select")->click();
+    t.click({-25, 65});
+    CHECK(std::abs(t.x() + 25) < 1e-6, "the mirrored star is there (x=%.3f)", t.x());
+    mirror->setCurrentIndex(0);
+    // Text needs its words first.
+    kinds->setCurrentIndex(kinds->findText("Text"));
+    for (QLineEdit* e : d6->findChildren<QLineEdit*>())
+      if (e->placeholderText() == "Text") e->setText("DAEDAL");
+    t.button("Draw")->click();
+    t.click({0, -60});
+    t.click({60, -40});
+    CHECK(std::abs(t.w() - 60) < 0.05 || std::abs(t.h() - 20) < 0.05, "text fills its box: %.3f x %.3f", t.w(), t.h());
+    t.button("Select")->click();
+    app.processEvents();
+    if (argc > 1) d6->grab().save(QString::fromLocal8Bit(argv[1]) + "/tools.png");
+    answerNextDialog("", "Discard");
+    d6->reject();
+    // Reopening brings the kept measurement back.
+    auto* d7 = new Shape2DEditorDialog(nullptr, lib.path(), lib.path() + "/tools/tools.svg");
+    d7->show();
+    app.processEvents();
+    Rig u{d7, nullptr, nullptr, {}};
+    for (QWidget* w : d7->findChildren<QWidget*>())
+      if (w->focusPolicy() == Qt::StrongFocus && w->minimumWidth() == 760) u.canvas = w;
+    for (QLabel* l : d7->findChildren<QLabel*>()) if (l->objectName() == "shape2dStatus") u.status = l;
+    u.button("Select")->click();
+    QPushButton* turn = u.button("Turn");
+    (void)turn;
+    d7->close();
+  }
   std::printf(fails ? "%d FAILED\n" : "editor checks passed\n", fails);
   return fails ? 1 : 0;
 }

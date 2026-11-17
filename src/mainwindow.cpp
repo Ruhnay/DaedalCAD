@@ -5440,7 +5440,9 @@ void MainWindow::showHelp() {
        "<b>Smoothness</b> sets how closely curves follow the font, from Draft (0.05 mm) to Ultra (0.001 mm)."},
       {"2d_shape", "2D shape editor",
        "Draw a flat outline and save it as an SVG; place it on the bed from the 2D Shapes library and it becomes a solid you can size "
-       "like any other part. Placed copies keep their own version: after editing a shape the app asks whether to update them."},
+       "like any other part. Placed copies keep their own version: after editing a shape the app asks whether to update them.<br><br>"
+       "<b>Import SVG…</b> adds the shapes of any SVG drawing, with its curves, outlines and holes; opening an SVG from elsewhere "
+       "reads it the same way, and saving keeps it as a new shape."},
       {"sculpt", "Sculpt",
        "Push and pull a shape's surface with brushes, like Blender's Sculpt Mode. Click <b>Sculpt</b> with nothing selected to "
        "start from a ball, cube, cylinder, slab or capsule; with one part selected it sculpts that part (a group or a part with "
@@ -5513,15 +5515,28 @@ void MainWindow::showHelp() {
        "In <b>Draw</b> mode, clicks draw with the shape picked in the list. <b>Freehand</b> places nodes one by one; click the first node "
        "to close the loop, and drag a node's round handles to curve a side.<br><br>"
        "The other shapes take two clicks: <b>Corner to corner</b>, <b>From centre</b>, or <b>Side to side</b> (for a circle, its left "
-       "and right edge). Shift keeps it square, or exactly level. New outlines are shapes; use Make hole to cut one out."},
+       "and right edge). Shift keeps it square, or exactly level. New outlines are shapes; use Make hole to cut one out.<br><br>"
+       "Besides squares, circles and polygons there are a <b>Star</b> (points and depth), a <b>Slot</b> with round ends, a "
+       "<b>Ring</b> and an <b>Arc</b> (width and angle), a <b>Heart</b>, an <b>Arrow</b>, a <b>Swirl</b> (arms, turns and line "
+       "width) and <b>Text</b> in any installed font, which fills the box you click while keeping its proportions.<br><br>"
+       "<b>Mirror left–right</b> or <b>top–bottom</b> adds the mirror image of everything you draw, across the dashed line through "
+       "0,0. Draw half an outline that starts and ends on that line and it closes into one whole shape."},
       {"2d_select", "2D: Select",
        "In <b>Select</b> mode, click a node to move it, or click inside a shape to move the whole shape. Arrow keys nudge by one grid "
        "step (Shift: ten), Delete removes, Ctrl+D duplicates.<br><br>"
        "The Selection panel shows the exact centre and size; type values there. A circle's width is its diameter. "
-       "<b>Make hole</b> / <b>Make shape</b> switches a shape between solid and cut-out. Ctrl+Z and Ctrl+Y undo and redo."},
+       "<b>Make hole</b> / <b>Make shape</b> switches a shape between solid and cut-out. Ctrl+Z and Ctrl+Y undo and redo.<br><br>"
+       "Shift-click or drag a box around shapes to select several (Ctrl+A: the whole layer); they move, size and turn together. "
+       "Drag the round handle above the selection to turn it (Shift: steps of 15°), or type an angle and press <b>Turn</b>. "
+       "<b>Flip</b> mirrors it in place. <b>Join</b> makes the selected shapes one outline, <b>Cut out</b> cuts the others out of "
+       "the one picked first, and <b>Overlap</b> keeps only where they overlap. <b>Line up</b> lines shapes up by their edges or "
+       "centres. <b>Round corners</b> rounds a selected corner node, or every sharp corner of the selected shapes. <b>Repeat…</b> "
+       "copies the selection in a row, a grid or around a circle, and shows the copies before adding them."},
       {"2d_measure", "2D: Measure",
        "Press Measure and click two points. Nodes and the centres of shapes and holes snap, on every layer, so measuring between two "
-       "screw holes is two clicks. The distance and the X and Y difference show on the drawing. Esc clears."},
+       "screw holes is two clicks. The distance and the X and Y difference show on the drawing.<br><br>"
+       "Each measurement stays on the drawing as a guide, and is saved with the shape (it is not part of the outline). Click one in "
+       "Select mode and press Delete to remove it, or right-click it while measuring. Esc clears a first point."},
       {"2d_layers", "2D: Layers",
        "A hole only cuts the shapes on its own layer. To keep a shape inside a hole, put it on another layer: select it and press "
        "<b>To new layer</b>. Merge shows layers together and still keeps their cuts apart; Unmerge splits them again. "

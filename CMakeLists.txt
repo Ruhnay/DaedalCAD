@@ -258,9 +258,14 @@ if(DAEDALCAD_FILLET_TESTS)
   # 2D shape editor: draws, measures, drags, undoes and saves through the real dialog.
   add_executable(shape2d_test test/shape2d_test.cpp src/shape2d.cpp)
   target_include_directories(shape2d_test PRIVATE src)
-  target_link_libraries(shape2d_test PRIVATE Qt6::Widgets)
+  target_link_libraries(shape2d_test PRIVATE Qt6::Widgets manifold)
   add_test(NAME shape2d COMMAND shape2d_test)
   set_tests_properties(shape2d PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_executable(shape2d_tools_test test/shape2d_tools_test.cpp src/shape2d.cpp)
+  target_include_directories(shape2d_tools_test PRIVATE src)
+  target_link_libraries(shape2d_tools_test PRIVATE Qt6::Widgets manifold)
+  add_test(NAME shape2d_tools COMMAND shape2d_tools_test)
+  set_tests_properties(shape2d_tools PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   # Grouping precision: holes and solids a hair off the plate still cut and merge cleanly.
   add_executable(group_precision_test test/group_precision_test.cpp src/document.cpp src/evaluator.cpp src/effects.cpp src/lattice.cpp src/sculpt.cpp src/generators.cpp
                  src/surfacefillet.cpp src/edgefillet.cpp src/textshape.cpp src/shape2d.cpp)
