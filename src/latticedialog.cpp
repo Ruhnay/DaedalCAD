@@ -277,8 +277,9 @@ void LatticeDialog::changed() {
   // a lot of memory once it is in the workspace (red).
   if (triangles > 10e6)
     estimate = QStringLiteral("<span style='color:#ff7b72'>%1: a very large amount. It may take 15 minutes or more to "
-                              "build, and in the workspace it uses a very large amount of memory. Larger cells, "
-                              "thicker walls or a coarser detail are much quicker.</span>")
+                              "build, and in the workspace it uses a very large amount of memory. It may slow "
+                              "DaedalCAD down considerably, and any edit in the workspace can take a long time. "
+                              "Larger cells, thicker walls or a coarser detail are much quicker.</span>")
                    .arg(estimate);
   else if (triangles > 1e6)
     estimate = QStringLiteral("<span style='color:#e8a040'>%1: a lot. Larger cells, thicker walls or a coarser detail "
