@@ -40,6 +40,10 @@ class LatticeDialog : public QDialog {
  private:
   struct Job;
   void changed();
+  // Cell size and walls for the chosen type, scaled up together until the result is about
+  // kTargetTriangles (never finer than the standard 8 mm cells), so a big part opens quickly. A very
+  // big part also gets a coarser detail once the cells and walls are as large as they go.
+  void fitToPart();
   void apply();
   // Starts building on another thread; the progress bar follows it. thenApply: ask Replace or Add
   // once it is done.
@@ -76,4 +80,6 @@ class LatticeDialog : public QDialog {
   std::thread worker_;
   bool applyAfter_ = false;
   bool lastOk_ = false;
+  bool sizeTouched_ = false;  // the user set the cell size, walls or detail: leave them be
+  bool detailFitted_ = false; // the detail was made coarser by fitToPart, not by the user
 };
