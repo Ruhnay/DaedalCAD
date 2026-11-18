@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(DaedalCAD VERSION 0.9.9 LANGUAGES CXX)
+project(DaedalCAD VERSION 0.9.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -214,6 +214,11 @@ if(WIN32)
   # Change the publisher with: cmake -DDAEDALCAD_PUBLISHER="Your Name"
   set(DAEDALCAD_PUBLISHER "DaedalCAD" CACHE STRING "Publisher name written into DaedalCAD.exe")
   string(TIMESTAMP DAEDALCAD_YEAR "%Y")
+  # The fourth number of the file version: a version like 0.9.9.1 has one, 0.9.9 counts as 0.9.9.0.
+  set(DAEDALCAD_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+  if(DAEDALCAD_VERSION_TWEAK STREQUAL "")
+    set(DAEDALCAD_VERSION_TWEAK 0)
+  endif()
   configure_file("${CMAKE_SOURCE_DIR}/src/version.rc.in" "${CMAKE_BINARY_DIR}/version.rc" @ONLY)
   target_sources(DaedalCAD PRIVATE "${CMAKE_BINARY_DIR}/version.rc")
 endif()
