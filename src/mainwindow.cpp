@@ -1201,11 +1201,19 @@ QIcon toolIcon(const QString& name) {
     painter.drawLine(QPointF(23, 9), QPointF(26, 6));
     painter.drawLine(QPointF(23, 9), QPointF(18, 7));
   } else if (key == "bend face") {
-    painter.setBrush(QColor(232, 116, 0, 70));
-    painter.drawRect(QRectF(5, 15, 11, 11));
-    painter.drawArc(QRectF(11, 5, 14, 14), 0, 90 * 16);
-    painter.drawLine(QPointF(18, 12), QPointF(26, 12));
-    painter.drawLine(QPointF(26, 12), QPointF(26, 5));
+    // The part's whole top face bends over a quarter turn and carries on to the side.
+    painter.setBrush(QColor(232, 116, 0, 90));
+    painter.drawRect(QRectF(4, 17, 10, 11));
+    QPainterPath bent;
+    bent.moveTo(4, 17);
+    bent.arcTo(QRectF(4, 4, 26, 26), 180, -90);
+    bent.lineTo(28, 4);
+    bent.lineTo(28, 14);
+    bent.lineTo(17, 14);
+    bent.arcTo(QRectF(14, 14, 6, 6), 90, 90);
+    bent.closeSubpath();
+    painter.setBrush(QColor(232, 116, 0, 46));
+    painter.drawPath(bent);
   } else if (key == "extrude face") {
     painter.drawRect(QRectF(5, 11, 11, 13));
     painter.setBrush(QColor(232, 116, 0, 110));
