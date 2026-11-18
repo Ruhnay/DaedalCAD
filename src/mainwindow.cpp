@@ -1017,6 +1017,18 @@ QIcon shapeIcon(const QString& key) {
       for (int i = 0; i < 3; ++i) painter.drawRoundedRect(QRectF(2 + i * 9, 9 + i * 2, 12, 9), 4.5, 4.5);
       painter.setBrush(dark);
       for (int i = 0; i < 3; ++i) painter.drawEllipse(QPointF(6.5 + i * 9, 13.5 + i * 2), 1.4, 1.4);
+    } else if (g == "servoholder") {
+      // A servo hanging by its tabs in an open box, its horn on top.
+      const QBrush fill = painter.brush();
+      painter.drawRect(QRectF(3, 16, 26, 12));
+      painter.setBrush(dark);
+      painter.drawRect(QRectF(7.5, 16, 17, 9));
+      painter.setBrush(fill);
+      painter.drawRect(QRectF(9, 8, 14, 15));
+      painter.drawRect(QRectF(4, 13.5, 24, 2.5));
+      painter.setBrush(dark);
+      painter.drawEllipse(QPointF(13, 8), 2.6, 2.6);
+      painter.drawRect(QRectF(12.2, 3, 1.6, 5));
     } else if (g == "tubeconnector") {
       painter.drawRect(QRectF(11, 11, 10, 10));
       painter.drawRect(QRectF(2, 12.5, 9, 7));
@@ -5570,7 +5582,8 @@ void MainWindow::showHelp() {
        "The <b>Generators</b> tab in the library makes parts from a few settings: a box with a lid that fits, Gridfinity bins and "
        "baseplates, a screw jar, an electronics enclosure, a battery holder, bolts and nuts, standoffs for circuit boards, gears, "
        "a rack and pinion, a print-in-place hinge, a ball joint, pulleys, bearing housings, shaft couplers and collars, springs, "
-       "a snap-fit, a living hinge, a cable chain, tube connectors, a hose adapter, a pattern panel (holes "
+       "a snap-fit, a living hinge, a cable chain, tube connectors, servo holders (a box, a panel or a side bracket for micro "
+       "and standard servos, or your own servo's sizes), a hose adapter, a pattern panel (holes "
        "as hexagons, circles, squares, diamonds, triangles, stars or slots, in a square or round plate) and a pattern tube (the same "
        "holes all the way round a straight or tapered tube: a vase, a pot, a lamp shade). Both can make <b>holes only</b>: just the "
        "holes, as a hole shape, to group with a part and cut the pattern into it (the tube's holes wrap round a round part sized "

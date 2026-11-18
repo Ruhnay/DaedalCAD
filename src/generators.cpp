@@ -707,6 +707,56 @@ std::vector<Spec> makeSpecs() {
     all.push_back(s);
   }
   {
+    Spec s{QStringLiteral("servoholder"), QStringLiteral("Servo holder"), mechanical,
+           QStringLiteral("Holds a hobby servo by its mounting tabs: a box it drops into, a panel with a cut-out, or an "
+                          "upright bracket on a foot. Micro 9 g and standard size, or your own servo's sizes."),
+           {}};
+    s.params = {choice("servo", "Servo",
+                       {{"micro", "Micro 9 g (SG90, MG90S)"},
+                        {"standard", "Standard (MG996R, MG995, S3003, DS3218)"},
+                        {"custom", "Set my own"}},
+                       "micro",
+                       "Standard-size servos differ a little between brands; the holder leaves room for that (the screw "
+                       "holes are short slots, and the servo hangs by its tabs)."),
+                when(number("bodyL", "Body length", 22.5, 5, 120, 0.1, 1, " mm", "The servo's case, without the tabs."), "servo=custom"),
+                when(number("bodyW", "Body width", 11.8, 4, 80, 0.1, 1, " mm"), "servo=custom"),
+                when(number("tabHeight", "Tabs from the bottom", 15.9, 2, 100, 0.1, 1, " mm",
+                            "From the bottom of the case to the underside of the mounting tabs."),
+                     "servo=custom"),
+                when(number("tabReach", "Tab length", 4.7, 1.5, 30, 0.1, 1, " mm", "How far each tab sticks out past the case."),
+                     "servo=custom"),
+                when(number("holeSpan", "Hole distance", 27.3, 6, 160, 0.1, 1, " mm",
+                            "Centre to centre, along the servo, from a hole in one tab to the hole in the other."),
+                     "servo=custom"),
+                when(integer("holesPerTab", "Holes per tab", 1, 1, 2, "Micro servos have one hole in each tab, standard ones two."),
+                     "servo=custom"),
+                when(number("holeAcross", "Holes apart across", 10, 2, 60, 0.1, 1, " mm", "With two holes per tab: centre to centre across the tab."),
+                     "servo=custom"),
+                choice("style", "Holder",
+                       {{"box", "Box: the servo drops in and hangs by its tabs"},
+                        {"plate", "Panel: a plate with a cut-out"},
+                        {"bracket", "Side bracket: an upright plate on a foot"}},
+                       "box"),
+                number("wall", "Wall", 2.4, 1.2, 10, 0.2, 1, " mm"),
+                when(number("thickness", "Plate thickness", 3, 1.2, 15, 0.2, 1, " mm"), "style=plate|bracket"),
+                choice("screws", "Tab screws",
+                       {{"tap", "The servo's own screws (into the plastic)"}, {"through", "Holes all the way through, for bolts"}},
+                       "tap"),
+                when(choice("cable", "Cable opening", {{"shaft", "At the shaft end"}, {"far", "At the other end"}, {"none", "None"}},
+                            "shaft", "A window low in the end wall that the plug fits through. The cable leaves the case near "
+                                     "the bottom; on most servos at the end nearest the shaft."),
+                     "style=box"),
+                choice("mount", "Holes to fix it with", {{"none", "None"}, {"m3", "M3"}, {"m4", "M4"}}, "m3",
+                       "Box: on two feet along the sides. Panel: in the corners. Bracket: in the foot."),
+                usePrinter(false, QStringLiteral("Clearance follows the printer clearance from Settings.")),
+                when(followsPrinter(number("clearance", "Clearance", 0.3, 0, 1.5, 0.05, 2, " mm",
+                                           "Gap around the servo's case on every side. Servo cases vary a little, so 0.3 mm "
+                                           "is a good start."),
+                                    1),
+                     "usePrinter=0")};
+    all.push_back(s);
+  }
+  {
     Spec s{QStringLiteral("hose"), QStringLiteral("Hose adapter"), household,
            QStringLiteral("Joins two hoses or pipes of different sizes: vacuum cleaners, shop vacs, aquarium and garden "
                           "hoses, fume extraction. Prints standing up without supports."),
@@ -3809,6 +3859,143 @@ std::vector<Piece> buildTubeConnector(const Values& v, QString*) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Servo holder
+
+struct ServoSize {
+  double length, width;  // the case, without the tabs
+  double tabHeight;      // bottom of the case to the underside of the tabs
+  double tabReach;       // how far a tab sticks out past the case
+  double holeSpan;       // along the servo, between the holes of the two tabs
+  double slack;          // the holes are slots this much longer each way, for brands that differ
+  int holesPerTab;
+  double holeAcross;     // with two holes per tab, across
+  double tapHole, throughHole;
+  double plugWidth;      // the cable opening must pass the plug
+};
+
+ServoSize servoSize(const Values& v) {
+  const QString kind = v.pick("servo");
+  // Micro: case 22.5 x 11.8 mm, tabs 2.5 mm thick from 15.9 mm up, reaching 4.7 mm; holes about
+  // 27.1-27.5 mm apart (sources differ). Standard: about 40-40.7 x 19.7-20.1 mm, tabs from 26.6-28.5 mm
+  // up, two holes per tab 10 mm apart across and 48.5-49.5 mm along.
+  if (kind == QLatin1String("standard")) return {40.7, 20.1, 28.5, 7.6, 49.0, 0.6, 2, 10.0, 2.6, 4.4, 10.0};
+  if (kind == QLatin1String("custom"))
+    return {v.num("bodyL"), v.num("bodyW"), v.num("tabHeight"), v.num("tabReach"), v.num("holeSpan"), 0.3,
+            v.whole("holesPerTab"), v.num("holeAcross"), 1.8, 2.4, 9.0};
+  return {22.5, 11.8, 15.9, 4.7, 27.3, 0.3, 1, 0.0, 1.7, 2.4, 9.0};
+}
+
+// A round hole stretched along X into a short slot, from z0 to z1.
+Manifold slotZ(double r, double slack, double z0, double z1, double x, double y) {
+  if (slack < 1e-6) return cylinderZ(r, z0, z1, x, y);
+  return prism(CrossSection::Hull({CrossSection(circle(r, circleSegments(r))).Translate(vec2(x - slack, y)),
+                                   CrossSection(circle(r, circleSegments(r))).Translate(vec2(x + slack, y))}),
+               z0, z1);
+}
+
+std::vector<Piece> buildServoHolder(const Values& v, QString* warning) {
+  const ServoSize servo = servoSize(v);
+  const double c = v.num("clearance");
+  const double wall = v.num("wall");
+  const double Lc = servo.length + 2 * c, Wc = servo.width + 2 * c;
+  const bool through = v.pick("screws") == QLatin1String("through");
+  const double holeR = (through ? servo.throughHole : servo.tapHole) / 2;
+  const QString mount = v.pick("mount");
+  const double mountR = mount == QLatin1String("m4") ? 2.2 : 1.7;
+  const double mountPad = mount == QLatin1String("m4") ? 10.0 : 8.0;
+  const QString style = v.pick("style");
+  if (servo.holeSpan / 2 - holeR < Lc / 2 + 0.4) note(warning, QStringLiteral("The tab holes sit over the case; check the hole distance."));
+  // Where the tab screws go, as (along, across) from the servo's middle.
+  std::vector<vec2> holes;
+  for (int side : {-1, 1})
+    for (int k = 0; k < servo.holesPerTab; ++k)
+      holes.push_back(vec2(side * servo.holeSpan / 2, servo.holesPerTab == 1 ? 0.0 : (k ? 0.5 : -0.5) * servo.holeAcross));
+  // Room around the holes: what the tabs rest on.
+  const double halfL = std::max(Lc / 2 + wall, servo.holeSpan / 2 + servo.slack + holeR + std::max(1.6, wall * 0.75));
+  const double halfAcross = servo.holesPerTab == 1 ? 0.0 : servo.holeAcross / 2;
+  const double halfW = std::max(Wc / 2 + wall, halfAcross + holeR + 1.6);
+
+  if (style == QLatin1String("plate")) {
+    const double t = v.num("thickness");
+    const bool fixed = mount != QLatin1String("none");
+    // Fixing holes go in the corners, past the tabs along the servo.
+    const double hx = halfL + (fixed ? mountPad : 0), hy = halfW + (fixed ? 1.0 : 0);
+    Manifold plate = prism(roundRect(hx, hy, 2.0, 8), 0, t);
+    plate = plate - block(-Lc / 2, Lc / 2, -Wc / 2, Wc / 2, -1, t + 1);
+    for (const vec2& h : holes) plate = plate - slotZ(holeR, servo.slack, -1, t + 1, h.x, h.y);
+    if (fixed)
+      for (int sx : {-1, 1})
+        for (int sy : {-1, 1}) plate = plate - cylinderZ(mountR, -1, t + 1, sx * (hx - mountPad / 2), sy * std::max(hy - mountPad / 2, 0.0));
+    return {{QStringLiteral("Servo panel"), plate}};
+  }
+
+  if (style == QLatin1String("bracket")) {
+    // An upright plate facing -Y; the tabs rest on its front, the case reaches back over the foot.
+    const double t = v.num("thickness");
+    const double zc = t + 1.0 + Wc / 2;  // the case's middle: its lower side clears the foot
+    const double top = zc + halfW;
+    const double footBack = t + std::max(servo.tabHeight + 3, 15.0);
+    Manifold upright = block(-halfL, halfL, 0, t, 0, top);
+    Manifold foot = block(-halfL, halfL, 0, footBack, 0, t);
+    // Ribs at both ends tie the plate to the foot.
+    const double ribH = std::min(top, servo.tabHeight + t) * 0.8, ribL = footBack - t;
+    // The rib reaches into the plate and the foot, so they join solidly, not along a shared face.
+    const CrossSection rib(SimplePolygon{vec2(t * 0.5, t * 0.5), vec2(t + ribL - 0.5, t * 0.5), vec2(t + ribL - 0.5, t),
+                                         vec2(t, t + ribH), vec2(t * 0.5, t + ribH)});
+    for (int side : {-1, 1}) {
+      const double x0 = side < 0 ? -halfL : halfL - wall;
+      Manifold r = Manifold::Extrude(rib.ToPolygons(), wall).Rotate(90, 0, 90).Translate(vec3(x0, 0, 0));
+      foot = foot + r;
+    }
+    Manifold bracket = upright + foot;
+    bracket = bracket - block(-Lc / 2, Lc / 2, -1, footBack + 1, zc - Wc / 2, zc + Wc / 2);
+    // Tab holes run through the upright as slotted teardrops, which print without support.
+    const CrossSection round(circle(holeR, circleSegments(holeR)));
+    const CrossSection tip(SimplePolygon{vec2(-0.01, holeR * std::sqrt(2.0)), vec2(0.01, holeR * std::sqrt(2.0)), vec2(0, 0)});
+    const CrossSection drop = CrossSection::Hull({round, tip});
+    const CrossSection slot = CrossSection::Hull({drop.Translate(vec2(-servo.slack, 0)), drop.Translate(vec2(servo.slack, 0))});
+    for (const vec2& h : holes)
+      bracket = bracket - Manifold::Extrude(slot.Translate(vec2(h.x, zc + h.y)).ToPolygons(), t + 2).Rotate(90, 0, 0).Translate(vec3(0, t + 1, 0));
+    if (mount != QLatin1String("none"))
+      for (int side : {-1, 1}) bracket = bracket - cylinderZ(mountR, -1, t + 1, side * (halfL - wall - mountR - 1.5), (t + footBack) / 2);
+    return {{QStringLiteral("Servo bracket"), bracket}};
+  }
+
+  // Box: floor, walls round the case, and the tabs resting on the end walls. The servo hangs by its
+  // tabs, with room below it, so a case that is a little taller still fits.
+  const double floorT = std::max(1.6, wall);
+  const double depth = servo.tabHeight + 1.5;
+  const double top = floorT + depth;
+  Manifold box = block(-halfL, halfL, -halfW, halfW, 0, top) - block(-Lc / 2, Lc / 2, -Wc / 2, Wc / 2, floorT, top + 1);
+  for (const vec2& h : holes)
+    box = box - slotZ(holeR, servo.slack, through ? -1.0 : std::max(floorT, top - 10.0), top + 1, h.x, h.y);
+  const QString cable = v.pick("cable");
+  if (cable != QLatin1String("none")) {
+    // A window at the bottom of the end wall, big enough for the plug, below the tab screws.
+    const double side = cable == QLatin1String("far") ? 1 : -1;
+    const double w = std::min(servo.plugWidth, Wc - 0.5);
+    const double h = std::min(servo.tabHeight * 0.55, depth - (through ? 0.0 : 10.0) - 1.0);
+    if (h > 2.5) {
+      const double x0 = side < 0 ? -halfL - 1 : Lc / 2 - 0.5, x1 = side < 0 ? -Lc / 2 + 0.5 : halfL + 1;
+      box = box - block(x0, x1, -w / 2, w / 2, floorT, floorT + h);
+    } else {
+      note(warning, QStringLiteral("No room for a cable opening below the tab screws."));
+    }
+  }
+  if (mount != QLatin1String("none")) {
+    // Two feet along the sides, each with a hole near either end.
+    for (int sy : {-1, 1}) {
+      const double y0 = sy < 0 ? -halfW - mountPad : halfW - 0.5, y1 = sy < 0 ? -halfW + 0.5 : halfW + mountPad;
+      Manifold feet = block(-halfL, halfL, y0, y1, 0, floorT);
+      for (int sx : {-1, 1}) feet = feet - cylinderZ(mountR, -1, floorT + 1, sx * (halfL - mountPad / 2), sy * (halfW + mountPad / 2));
+      box = box + feet;
+    }
+  }
+  return {{QStringLiteral("Servo holder"), box}};
+}
+
+
+// ---------------------------------------------------------------------------------------------
 // Bit and tool holder
 
 std::vector<Piece> buildToolHolder(const Values& v, QString*) {
@@ -5146,6 +5333,7 @@ std::vector<Piece> build(const QString& id, const QJsonObject& values, QString* 
     else if (id == QLatin1String("livinghinge")) pieces = buildLivingHinge(v, warning);
     else if (id == QLatin1String("cablechain")) pieces = buildCableChain(v, warning);
     else if (id == QLatin1String("tubeconnector")) pieces = buildTubeConnector(v, warning);
+    else if (id == QLatin1String("servoholder")) pieces = buildServoHolder(v, warning);
     else if (id == QLatin1String("toolholder")) pieces = buildToolHolder(v, warning);
     else if (id == QLatin1String("dividers")) pieces = buildDividers(v, warning);
     else if (id == QLatin1String("cable")) pieces = buildCable(v, warning);

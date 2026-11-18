@@ -607,6 +607,83 @@ int main() {
     }
   }
 
+  // --- Servo holder ----------------------------------------------------------------------------
+  {
+    // A servo as a block: case, tabs (with their screw holes), and the case above the tabs.
+    struct Size { const char* name; double L, W, tabH, reach, span, across; int holes; double tabW; };
+    const Size sizes[] = {{"micro", 22.5, 11.8, 15.9, 4.7, 27.3, 0, 1, 11.8}, {"standard", 40.7, 20.1, 28.5, 7.6, 49.0, 10, 2, 18.0}};
+    auto servoAt = [](const Size& z, double base) {
+      manifold::Manifold caseBlock = manifold::Manifold::Cube({z.L, z.W, z.tabH + 2.5 + 5}).Translate({-z.L / 2, -z.W / 2, base});
+      manifold::Manifold tabs = manifold::Manifold::Cube({z.L + 2 * z.reach, z.tabW, 2.5}).Translate({-z.L / 2 - z.reach, -z.tabW / 2, base + z.tabH});
+      return caseBlock + tabs;
+    };
+    auto holePoints = [](const Size& z) {
+      std::vector<manifold::vec2> out;
+      for (int sx : {-1, 1})
+        for (int k = 0; k < z.holes; ++k) out.push_back({sx * z.span / 2, z.holes == 1 ? 0.0 : (k ? 0.5 : -0.5) * z.across});
+      return out;
+    };
+    // The parts as the builder made them, before build() centres them.
+    auto made = [&](QJsonObject values, const std::string& label) {
+      auto pieces = make("servoholder", values, label);
+      manifold::vec3 centre(0, 0, 0);
+      gen::build(QStringLiteral("servoholder"), values, nullptr, 0.2, &centre);
+      for (auto& piece : pieces) piece.solid = piece.solid.Translate(centre);
+      return pieces;
+    };
+    for (const Size& z : sizes) {
+      const std::string tag = std::string("servo ") + z.name;
+      // Box: the servo hangs by its tabs on the end walls.
+      const auto box = made(QJsonObject{{"servo", z.name}, {"style", "box"}}, "servo box");
+      if (!box.empty()) {
+        const manifold::Box b = box[0].solid.BoundingBox();
+        const double top = b.max.z;
+        check(box[0].solid.Decompose().size() == 1, tag + " box: one piece");
+        check((box[0].solid ^ servoAt(z, top - z.tabH)).Volume() < 1e-6, tag + " box: the servo fits without touching");
+        check((box[0].solid ^ servoAt(z, top - z.tabH - 0.3)).Volume() > 0.01, tag + " box: it rests on its tabs");
+        for (const auto& h : holePoints(z))
+          check((box[0].solid ^ manifold::Manifold::Cylinder(3, 0.4).Translate({h.x, h.y, top - 3})).Volume() < 1e-6,
+                tag + " box: screw holes under the tab holes");
+        check((box[0].solid ^ manifold::Manifold::Cube({4, 2, 2}).Translate({-z.L / 2 - 4, -1, 3})).Volume() < 1e-6,
+              tag + " box: a cable opening at the shaft end");
+      }
+      // Panel: the case goes through, the tabs rest on it.
+      const auto panel = made(QJsonObject{{"servo", z.name}, {"style", "plate"}, {"thickness", 3}}, "servo panel");
+      if (!panel.empty()) {
+        check((panel[0].solid ^ servoAt(z, 3 - z.tabH)).Volume() < 1e-6, tag + " panel: the case passes through the cut-out");
+        check((panel[0].solid ^ servoAt(z, 3 - z.tabH - 0.3)).Volume() > 0.01, tag + " panel: the tabs rest on it");
+        for (const auto& h : holePoints(z))
+          check((panel[0].solid ^ manifold::Manifold::Cylinder(5, 0.4).Translate({h.x, h.y, -1})).Volume() < 1e-6,
+                tag + " panel: screw holes under the tab holes");
+      }
+      // Bracket: the tabs on the front of the upright, the case reaching back over the foot.
+      const auto bracket = made(QJsonObject{{"servo", z.name}, {"style", "bracket"}, {"thickness", 3}}, "servo bracket");
+      if (!bracket.empty()) {
+        const double zc = 3 + 1 + (z.W + 0.6) / 2;
+        // Servo bottom toward +Y, its width standing up: (x, y, z) -> (x, tabH - z, zc + y).
+        auto upright = [&](const manifold::Manifold& m, double shift) {
+          return m.Warp([&, shift](manifold::vec3& p) { p = manifold::vec3(p.x, z.tabH - p.z + shift, zc + p.y); });
+        };
+        const manifold::Manifold mounted = upright(servoAt(z, 0), 0);
+        check(bracket[0].solid.Decompose().size() == 1, tag + " bracket: one piece");
+        check((bracket[0].solid ^ mounted).Volume() < 1e-6, tag + " bracket: the servo fits without touching");
+        check((bracket[0].solid ^ upright(servoAt(z, 0), 0.3)).Volume() > 0.01, tag + " bracket: it rests on its tabs");
+        for (const auto& h : holePoints(z))
+          check((bracket[0].solid ^ manifold::Manifold::Cylinder(5, 0.4).Rotate(-90, 0, 0).Translate({h.x, -1, zc + h.y})).Volume() < 1e-6,
+                tag + " bracket: screw holes behind the tab holes");
+      }
+    }
+    // Own sizes, holes through, no fixing holes.
+    const auto own = made(QJsonObject{{"servo", "custom"}, {"bodyL", 32}, {"bodyW", 12}, {"tabHeight", 18}, {"tabReach", 5},
+                                      {"holeSpan", 38}, {"screws", "through"}, {"mount", "none"}, {"cable", "none"}},
+                     "servo own sizes");
+    if (!own.empty()) {
+      const manifold::Box b = own[0].solid.BoundingBox();
+      check((own[0].solid ^ manifold::Manifold::Cylinder(b.max.z + 2, 0.5).Translate({19, 0, -1})).Volume() < 1e-6,
+            "servo own sizes: holes all the way through");
+    }
+  }
+
   // --- Swirl -----------------------------------------------------------------------------------
   {
     const auto lines = make("swirl", {}, "swirl lines");
